@@ -26,7 +26,7 @@
     "lint:fix": "oxlint --vue-plugin --fix packages/gpui-vue/src packages/gpui-vue/test examples scripts vite.examples.config.mts",
     "test": "bun --filter gpui-vue test && cargo test --workspace",
     "test:native": "bun run scripts/native-smoke.mts",
-    "typecheck": "bun --filter gpui-vue typecheck && bun --filter '@gpui-vue/example-*' typecheck"
+    "typecheck": "bun --filter gpui-vue typecheck && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' typecheck"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.3",

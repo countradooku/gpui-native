@@ -26,7 +26,7 @@ jobs:
     name: Quality and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -40,7 +40,7 @@ jobs:
           rustflags: ""
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -73,9 +73,6 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
-      - name: Build package with Oxc
-        run: bun --filter gpui-vue build
-
       - name: Build Vue examples with Vite and Oxc
         run: bun --filter '@gpui-vue/example-*' build
 
@@ -105,7 +102,7 @@ jobs:
             script: build:release
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -124,7 +121,7 @@ jobs:
         run: xcodebuild -downloadComponent MetalToolchain
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -157,7 +154,7 @@ jobs:
         shell: bash
 
       - name: Upload native binding
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.settings.target }}
           path: packages/gpui-vue-native/${{ env.APP_NAME }}.*.node
@@ -171,7 +168,7 @@ jobs:
       - native
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -182,7 +179,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Download macOS arm64 binding
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bindings-aarch64-apple-darwin
           path: packages/gpui-vue-native
@@ -202,10 +199,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download native bindings
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: bindings-*
           path: release-assets
