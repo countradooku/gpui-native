@@ -1,0 +1,34 @@
+# gpui-vue examples
+
+Each example is a small native Vue application written as Vue SFCs with
+`<template>` and `<script setup lang="ts">`. They use no browser DOM and no
+JavaScript render loop.
+
+| Example            | SFC                                                  | Demonstrates                                                       | Run                                                     |
+| ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| `counter`          | `counter/src/App.vue`                                | Vue reactivity, native input/code, and a motion entrance           | `bun --filter @gpui-vue/example-counter start`          |
+| `canvas`           | `canvas/src/App.vue`                                 | Retained GPU paths, pointer events, and a 4,000-point stress case  | `bun --filter @gpui-vue/example-canvas start`           |
+| `motion-timeline`  | `motion-timeline/src/App.vue`                        | Keyframes, springs, stagger, pause, seek, and playback rate        | `bun --filter @gpui-vue/example-motion-timeline start`  |
+| `multiple-windows` | `multiple-windows/src/{Controller,Inspector}App.vue` | Independent native Vue roots sharing reactive state                | `bun --filter @gpui-vue/example-multiple-windows start` |
+| `audio-buffer`     | `audio-buffer/src/App.vue`                           | Chunked stereo f32 ingestion, dequeue, and bounded-buffer overflow | `bun --filter @gpui-vue/example-audio-buffer start`     |
+
+Build the native addon, package, and every example from the repository root:
+
+```bash
+bun run build
+bun run build:binaries
+```
+
+Each example build runs strict `vue-tsc` template checking and then compiles a
+small Node-compatible ESM bundle through Vite 8's Rolldown/Oxc pipeline and runs
+it with Bun. Vue generates VNodes, while `render()` or `createWindow()` mounts
+them through the GPUI custom renderer.
+
+`bun run build:binaries` produces one self-contained executable per example in
+its `dist/` directory. These executables embed Bun and the current platform's
+N-API addon, so cross-platform releases must be built on or targeted with a
+matching native-addon build for each operating system and architecture.
+
+The audio example demonstrates the high-throughput decoded-frame bridge and
+its low-latency overflow behavior. Actual device playback remains the
+responsibility of the embedding native audio backend.

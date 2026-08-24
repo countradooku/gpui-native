@@ -1,0 +1,67 @@
+{
+  "name": "gpui-vue",
+  "version": "0.1.0",
+  "description": "Vue 3 custom renderer bindings for Zed's GPUI",
+  "homepage": "https://github.com/countradooku/gpui-vue#readme",
+  "bugs": {
+    "url": "https://github.com/countradooku/gpui-vue/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/countradooku/gpui-vue.git",
+    "directory": "packages/gpui-vue"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./automation": {
+      "types": "./dist/automation.d.ts",
+      "import": "./dist/automation.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
+    },
+    "./combobox": {
+      "types": "./dist/combobox.d.ts",
+      "import": "./dist/combobox.js"
+    },
+    "./select": {
+      "types": "./dist/select.d.ts",
+      "import": "./dist/select.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./tooltip": {
+      "types": "./dist/tooltip.d.ts",
+      "import": "./dist/tooltip.js"
+    }
+  },
+  "scripts": {
+    "build": "bun run ../../scripts/build-gpui-vue.mts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gpui-vue/native": "workspace:^",
+    "@vue/runtime-core": "^3.5.41",
+    "eventsource-parser": "^4.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  }
+}

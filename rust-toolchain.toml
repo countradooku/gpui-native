@@ -1,0 +1,4 @@
+[toolchain]
+# Must match the toolchain used by the pinned GPUI revision.
+channel = "1.97.1"
+profile = "minimal"

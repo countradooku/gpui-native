@@ -1,0 +1,41 @@
+{
+  "name": "@gpui-vue/native",
+  "version": "0.1.0",
+  "description": "First-party N-API bindings for gpui-vue",
+  "homepage": "https://github.com/countradooku/gpui-vue#readme",
+  "bugs": {
+    "url": "https://github.com/countradooku/gpui-vue/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/countradooku/gpui-vue.git",
+    "directory": "packages/gpui-vue-native"
+  },
+  "files": [
+    "index.cjs",
+    "index.d.ts",
+    "*.node"
+  ],
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "napi build --platform --release --manifest-path ../../crates/gpui-vue-core/Cargo.toml --no-default-features --features napi-bindings,native-window,test-support --output-dir .",
+    "build:release": "napi build --platform --release --manifest-path ../../crates/gpui-vue-core/Cargo.toml --no-default-features --features napi-bindings,native-window --output-dir .",
+    "build:headless": "bun run build"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.1.3"
+  },
+  "napi": {
+    "binaryName": "gpui-vue-native",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "packages/gpui-vue-native/index.cjs",
+    "packages/gpui-vue-native/index.d.ts"
+  ],
+  "printWidth": 100,
+  "semi": false,
+  "singleQuote": false,
+  "sortImports": true,
+  "sortPackageJson": true,
+  "trailingComma": "all"
+}

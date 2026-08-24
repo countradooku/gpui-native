@@ -1,0 +1,13 @@
+/target/
+node_modules/
+dist/
+*.node
+.env
+.env.*
+!.env.example
+*.log
+.idea/
+.vscode/
+coverage/
+packages/gpui-vue-native/index.js
+.DS_Store

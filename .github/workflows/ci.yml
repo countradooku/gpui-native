@@ -1,0 +1,220 @@
+name: CI
+
+env:
+  APP_NAME: gpui-vue-native
+  BUN_VERSION: "1.4.0"
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: quality-${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            quality-${{ runner.os }}-cargo-
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ clang \
+            libfontconfig-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libssl-dev \
+            libzstd-dev \
+            libvulkan1 \
+            vulkan-validationlayers
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check formatting, lint, types, and Rust
+        run: bun run check
+
+      - name: Run unit tests
+        run: bun run test
+
+      - name: Build package with Oxc
+        run: bun --filter gpui-vue build
+
+      - name: Build Vue examples with Vite and Oxc
+        run: bun --filter '@gpui-vue/example-*' build
+
+  native:
+    name: Native - ${{ matrix.settings.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            script: build
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            script: build
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            script: build:release
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            script: build:release
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            script: build:release
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            script: build:release
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.settings.target }}
+          cache: false
+          rustflags: ""
+
+      - name: Install Metal toolchain
+        if: contains(matrix.settings.target, 'apple-darwin')
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.settings.target }}-cargo-
+
+      - name: Install Linux dependencies
+        if: contains(matrix.settings.target, 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ clang \
+            libfontconfig-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libssl-dev \
+            libzstd-dev \
+            libvulkan1 \
+            vulkan-validationlayers
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build native binding
+        run: bun --filter @gpui-vue/native ${{ matrix.settings.script }} --target ${{ matrix.settings.target }}
+        shell: bash
+
+      - name: Upload native binding
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: packages/gpui-vue-native/${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+          retention-days: 14
+
+  native-smoke:
+    name: Native package smoke test
+    needs:
+      - quality
+      - native
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download macOS arm64 binding
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: packages/gpui-vue-native
+
+      - name: Build Vue package
+        run: bun --filter gpui-vue build
+
+      - name: Load and exercise native binding
+        run: bun run test:native
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - native-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download native bindings
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/*.node \
+            --generate-notes \
+            --title "gpui-vue $GITHUB_REF_NAME"

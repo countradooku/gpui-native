@@ -1,0 +1,73 @@
+[package]
+name = "gpui-vue-core"
+version = "0.1.0"
+edition = "2021"
+description = "Full native GPUI renderer and component runtime for gpui-vue"
+license = "Apache-2.0"
+repository = "https://github.com/countradooku/gpui-vue"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+env_logger = "0.11"
+futures = "0.3"
+log = "0.4"
+napi = { version = "3", features = ["napi8", "serde-json"] }
+napi-derive = "3"
+parking_lot = "0.12"
+pulldown-cmark = { version = "0.12", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tree-sitter = "0.26.11"
+tree-sitter-bash = "0.25.1"
+tree-sitter-c = "0.24.2"
+tree-sitter-css = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-highlight = "0.26.11"
+tree-sitter-html = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-md = "0.5.3"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
+unicode-segmentation = "1"
+
+# Pin the GPUI fork/revision used by the parity engine. The native text,
+# automation, screenshot, and embedded-window APIs are newer than crates.io.
+gpui = { git = "https://github.com/remorses/zed.git", rev = "db0820f6756b9d789707a3de01cee72ff5251941", default-features = false, features = [
+  "font-kit",
+  "profiler",
+] }
+gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "db0820f6756b9d789707a3de01cee72ff5251941", default-features = false, features = [
+  "font-kit",
+  "wayland",
+  "x11",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "=0.24.0"
+core-text = "=21.0.0"
+gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "db0820f6756b9d789707a3de01cee72ff5251941", default-features = false, features = [
+  "font-kit",
+] }
+
+[features]
+default = []
+# Compatibility feature names used by the npm build scripts. The full native
+# parity engine is always compiled; these names keep the CLI stable.
+gpui-renderer = []
+napi-bindings = []
+native-window = []
+test-support = ["gpui/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
+
+[build-dependencies]
+napi-build = "2"
+
+[lints]
+workspace = true
