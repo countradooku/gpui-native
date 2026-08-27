@@ -28,6 +28,7 @@ import {
   createWindow,
   decodeSseChunk,
   encodeSse,
+  findRanges,
   findAutomationNodeByTestId,
   mountGpui,
   MotionDiv,
@@ -35,6 +36,7 @@ import {
   startFrameLoop,
   useElementRef,
   useGpuiWindow,
+  useTextSearch,
   stagger,
   type NativeRenderer,
   type TestAutomationRenderer,
@@ -89,6 +91,23 @@ describe("GPUI Vue renderer", () => {
     expect(bridge.nodes.get(updatedTextId ?? -1)?.text).toBe("B2")
   })
 
+  it("applies mutation batches atomically in the memory renderer", () => {
+    const bridge = new MemoryNativeBridge()
+    bridge.createElement(1, "text")
+    bridge.setText(1, "before")
+
+    expect(() =>
+      bridge.applyBatch(
+        JSON.stringify([
+          ["setText", 1, "after"],
+          ["setStyle", 1, "{invalid json"],
+        ]),
+      ),
+    ).toThrow(/JSON|position|property/i)
+    expect(bridge.nodes.get(1)?.text).toBe("before")
+    expect(bridge.commitCount).toBe(0)
+  })
+
   it("rejects elements that do not have a GPUI mapping yet", () => {
     const host = createGpuiRenderer(new MemoryNativeBridge())
     expect(() => host.render(h("span"), host.root)).toThrow("Unsupported GPUI element tag: span")
@@ -119,6 +138,56 @@ describe("GPUI Vue renderer", () => {
     expect(root.findByTestId("counter").text).toBe("Count: 1")
     expect(root.renderer.focusedElementId).toBeNull()
     root.unmount()
+  })
+
+  it("maps auxiliary clicks, visible ranges, and text highlights", () => {
+    const bridge = new MemoryNativeBridge()
+    const host = createGpuiRenderer(bridge)
+    host.render(
+      h(
+        "virtual-list",
+        {
+          itemCount: 100,
+          estimatedItemHeight: 24,
+          windowStart: 20,
+          highlight: { query: "item", activeIndex: 1, matchIndexOffset: 5 },
+          onAuxClick() {},
+          onVisibleRange() {},
+          onHighlight() {},
+        },
+        "item",
+      ),
+      host.root,
+    )
+
+    const root = bridge.nodes.get(bridge.rootId ?? -1)
+    const list = bridge.nodes.get(root?.children[0] ?? -1)
+    expect(list?.events).toEqual(new Set(["auxClick", "visibleRange", "highlight"]))
+    expect(list?.customProps).toMatchObject({
+      itemCount: 100,
+      estimatedItemHeight: 24,
+      windowStart: 20,
+      highlight: { query: "item", activeIndex: 1, matchIndexOffset: 5 },
+    })
+  })
+
+  it("matches native text-search rules and drives a reactive find cursor", () => {
+    expect(findRanges({ text: "cat scatter CAT", query: "cat", wholeWord: true })).toEqual([
+      [0, 3],
+      [12, 15],
+    ])
+    expect(findRanges({ text: "İstanbul and fox", query: "fox" })).toEqual([[13, 16]])
+
+    const query = ref("todo")
+    const search = useTextSearch({ query })
+    search.props.value.onHighlight?.({ elementId: 1, eventType: "highlight", matchCount: 3 })
+    expect(search.total.value).toBe(3)
+    search.next()
+    expect(search.active.value).toBe(1)
+    expect(search.props.value.highlight).toMatchObject({ query: "todo", activeIndex: 1 })
+    query.value = ""
+    expect(search.total.value).toBe(0)
+    expect(search.props.value.highlight).toBeNull()
   })
 
   it("exposes deterministic automation snapshots", () => {
@@ -416,12 +485,15 @@ describe("GPUI Vue renderer", () => {
   })
 
   it("provides the typed locator and SSE automation protocol", async () => {
-    const clicks: Array<[number, number]> = []
+    const clicks: Array<[number, number, number | undefined, string | undefined]> = []
+    const moves: Array<[number, number, number | undefined, string | undefined]> = []
+    const downs: Array<[number, number, number | undefined, string | undefined]> = []
+    const ups: Array<[number, number, number | undefined, string | undefined]> = []
     const automationRenderer: TestAutomationRenderer = {
-      nativeSimulateClick: (x, y) => clicks.push([x, y]),
-      nativeSimulateMouseDown() {},
-      nativeSimulateMouseUp() {},
-      nativeSimulateMouseMove() {},
+      nativeSimulateClick: (x, y, button, modifiers) => clicks.push([x, y, button, modifiers]),
+      nativeSimulateMouseDown: (x, y, button, modifiers) => downs.push([x, y, button, modifiers]),
+      nativeSimulateMouseUp: (x, y, button, modifiers) => ups.push([x, y, button, modifiers]),
+      nativeSimulateMouseMove: (x, y, button, modifiers) => moves.push([x, y, button, modifiers]),
       nativeSimulateScrollWheel() {},
       simulateKeystrokes() {},
       nativeSimulateKeystrokes() {},
@@ -458,8 +530,16 @@ describe("GPUI Vue renderer", () => {
     const app = await connectTest(automationRenderer)
     const save = app.getByTestId("save")
     expect(await save.textContent()).toBe("Save")
-    await save.click()
-    expect(clicks).toEqual([[50, 40]])
+    await save.click({ button: 2, modifiers: "shift" })
+    expect(clicks).toEqual([[50, 40, 2, "shift"]])
+    await save.dragBy(20, 10, { steps: 2, modifiers: "cmd" })
+    expect(downs).toEqual([[50, 40, 0, "cmd"]])
+    expect(moves).toEqual([
+      [50, 40, undefined, "cmd"],
+      [60, 45, 0, "cmd"],
+      [70, 50, 0, "cmd"],
+    ])
+    expect(ups).toEqual([[70, 50, 0, "cmd"]])
     await app.close()
 
     const wire = encodeSse({

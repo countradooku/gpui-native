@@ -2,3 +2,6 @@
 # Allows zed-font-kit to load Fontconfig at runtime on Linux distributions
 # that provide the shared library without the fontconfig development package.
 RUST_FONTCONFIG_DLOPEN = { value = "1", force = false }
+
+[unstable]
+build-std = ["std,panic_abort"]

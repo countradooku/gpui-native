@@ -1,17 +1,16 @@
 /// TestGpuiRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
-/// Uses gpui::VisualTestAppContext (real Metal rendering on macOS) with
-/// TestDispatcher for deterministic scheduling. Runs the SAME GpuiView,
+/// Uses gpui::VisualTestAppContext with the native Metal or DirectX renderer
+/// and TestDispatcher for deterministic scheduling. Runs the SAME GpuiView,
 /// build_element(), apply_styles(), and event handlers as production.
 ///
 /// Windows are positioned offscreen at (-10000, -10000) — invisible but
-/// fully rendered by Metal. This enables capture_screenshot() for visual
+/// fully rendered by the native GPU. This enables capture_screenshot() for visual
 /// test validation.
 ///
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use napi::bindgen_prelude::*;
@@ -21,11 +20,10 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
-    apply_batch_to_tree, debug_frame_overlay_mode_name, parse_debug_frame_overlay_mode,
-    to_element_id, EventCallback, GpuiView,
+    apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
+    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback, GpuiView,
 };
 use crate::retained_tree::RetainedTree;
-use crate::style::StyleDesc;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -38,6 +36,46 @@ struct VisualTestState {
     view: gpui::Entity<GpuiView>,
     window: gpui::AnyWindowHandle,
     cx: gpui::VisualTestAppContext,
+}
+
+/// Release every `Entity` handle the view is holding, while the `App` is alive.
+///
+/// The test build enables gpui's leak detector, which panics if a handle
+/// outlives its `App`. `<input>` keeps an `Entity<TextEditorState>` in the
+/// view's custom element registry, so that panic fires from a thread-local
+/// destructor at process exit. macOS never runs this destructor, so the panic
+/// only appeared once Windows started running the suite: every test file
+/// passed and then the vitest worker died with "Worker exited unexpectedly".
+///
+/// `drop` runs before the fields are dropped, so `view` and `cx` are both
+/// still usable here.
+impl Drop for VisualTestState {
+    fn drop(&mut self) {
+        let view = self.view.clone();
+        // Unmount, exactly as Vue would: empty the tree, then paint one more
+        // frame. The registry is not the only owner of the entity. `<input>`
+        // installs an `ElementInputHandler` during paint, and a clone of that
+        // lives in the window's rendered frame and in the platform window. A
+        // frame with nothing in it is what drops those, and it has to happen
+        // while the `App` is still alive.
+        self.cx.update(|cx| {
+            view.update(cx, |view, cx| {
+                if let Ok(mut tree) = view.tree.lock() {
+                    tree.root_id = None;
+                }
+                view.custom_registry.destroy_all();
+                view.focus_subscriptions.clear();
+                view.focus_handles.clear();
+                cx.notify();
+            });
+        });
+        // Err only means the window is already gone, which is the state this
+        // is trying to reach.
+        self.cx
+            .update_window(self.window, |_, window, _| window.refresh())
+            .ok();
+        self.cx.run_until_parked();
+    }
 }
 
 thread_local! {
@@ -63,6 +101,32 @@ fn with_test_state<R>(
     })
 }
 
+/// Default offscreen window size. Matches gpui's `open_offscreen_window_default`,
+/// so a `new TestGpuiRenderer()` with no size behaves exactly as before.
+///
+/// Note for layout tests: 1280 is wide enough that a centered max-width content
+/// column stays capped whether a sidebar is open or closed. A test that needs to
+/// observe re-wrapping must pass a narrower width explicitly.
+const DEFAULT_WINDOW_WIDTH: f64 = 1280.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
+
+/// Validate a caller-supplied window dimension, falling back to `default`.
+///
+/// Checks the value *after* the `f32` cast: a finite `f64` such as `1e300`
+/// saturates to `f32::INFINITY`, which would open a window with no usable size.
+fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32> {
+    let Some(value) = value else {
+        return Ok(default as f32);
+    };
+    let pixels = value as f32;
+    if !pixels.is_finite() || pixels <= 0.0 {
+        return Err(Error::from_reason(format!(
+            "TestGpuiRenderer {label} must be a positive, finite number, got {value}"
+        )));
+    }
+    Ok(pixels)
+}
+
 /// Convert JS button number (0=left, 1=middle, 2=right) to GPUI MouseButton.
 fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     match button {
@@ -74,8 +138,8 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
 
 // ── TestGpuiRenderer ────────────────────────────────────────────────
 
-/// GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
-/// rendering on macOS) with TestDispatcher for deterministic scheduling.
+/// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
+/// Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
 /// Same GpuiView and rendering pipeline as production.
 ///
 /// Usage from JS:
@@ -83,7 +147,7 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
 ///   r.createElement(1, "div")
 ///   r.setRoot(1)
 ///   r.commitMutations()
-///   r.flush()                  // triggers GpuiView::render() via Metal
+///   r.flush()                  // triggers GpuiView::render() on the GPU
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
 ///   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
@@ -99,7 +163,11 @@ pub struct TestGpuiRenderer {
 #[napi]
 impl TestGpuiRenderer {
     #[napi(constructor)]
-    pub fn new() -> Result<Self> {
+    pub fn new(width: Option<f64>, height: Option<f64>) -> Result<Self> {
+        let window_size = gpui::size(
+            gpui::px(window_dimension(width, DEFAULT_WINDOW_WIDTH, "width")?),
+            gpui::px(window_dimension(height, DEFAULT_WINDOW_HEIGHT, "height")?),
+        );
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -114,26 +182,23 @@ impl TestGpuiRenderer {
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
 
-        // Create VisualTestAppContext with real macOS Metal rendering +
-        // TestDispatcher for deterministic scheduling.
-        let mac_platform = gpui_macos::MacPlatform::new(false);
-        let mut cx = gpui::VisualTestAppContext::new(Rc::new(mac_platform));
+        let platform = gpui_platform::current_platform(false);
+        let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
             crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
         });
 
-        // Open an offscreen window at (-10000, -10000) — invisible but fully
-        // rendered by Metal. Uses the same GpuiView as production.
+        // Open an offscreen window at (-10000, -10000) with the same GpuiView
+        // and native GPU renderer as production.
         let window_handle = cx
-            .open_offscreen_window_default(|_window, app| {
+            .open_offscreen_window(window_size, |_window, app| {
                 app.new(|_cx| {
                     GpuiView::new(
                         tree_clone,
                         callback_clone,
                         "GPUI Vue Test".to_string(),
                         selection_clone,
-                        crate::automation::AutomationClock::new(),
                     )
                 })
             })
@@ -208,10 +273,11 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
-        self.tree.lock().unwrap().set_style(id, style);
-        Ok(())
+        self.tree
+            .lock()
+            .unwrap()
+            .set_style_json(id, style_json.as_bytes())
+            .map_err(|error| Error::from_reason(format!("Failed to parse style: {error}")))
     }
 
     #[napi]
@@ -271,10 +337,8 @@ impl TestGpuiRenderer {
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
-        let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, &ops)
+        apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)
     }
 
     // ── Test-specific methods ────────────────────────────────────────
@@ -303,13 +367,40 @@ impl TestGpuiRenderer {
     /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
     /// which triggers the same event handlers as production.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+    /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
     #[napi]
-    pub fn simulate_click(&self, x: f64, y: f64) -> Result<()> {
+    pub fn simulate_click(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let button = button.unwrap_or(0);
         with_test_state(|cx, window, _view| {
-            cx.simulate_click(
+            // Not `cx.simulate_click`: that helper hard-codes the left button,
+            // so a right click silently became a left click.
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            let gpui_button = u32_to_mouse_button(button);
+            cx.simulate_event(
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                gpui::Modifiers::default(),
+                gpui::MouseDownEvent {
+                    position,
+                    modifiers,
+                    button: gpui_button,
+                    click_count: 1,
+                    first_mouse: false,
+                },
+            );
+            cx.simulate_event(
+                window,
+                gpui::MouseUpEvent {
+                    position,
+                    modifiers,
+                    button: gpui_button,
+                    click_count: 1,
+                },
             );
             Ok(())
         })
@@ -371,7 +462,14 @@ impl TestGpuiRenderer {
     /// pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
     /// Used to simulate drag events.
     #[napi]
-    pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_move(
+        &self,
+        x: f64,
+        y: f64,
+        pressed_button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
@@ -379,7 +477,7 @@ impl TestGpuiRenderer {
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 button,
-                gpui::Modifiers::default(),
+                modifiers,
             );
 
             Ok(())
@@ -416,13 +514,20 @@ impl TestGpuiRenderer {
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_down(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_mouse_down(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         })
@@ -431,13 +536,20 @@ impl TestGpuiRenderer {
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_up(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_mouse_up(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         })
@@ -446,7 +558,15 @@ impl TestGpuiRenderer {
     /// Simulate a scroll wheel event at the given position.
     /// delta_x and delta_y are in pixels (negative = scroll up/left).
     #[napi]
-    pub fn simulate_scroll_wheel(&self, x: f64, y: f64, delta_x: f64, delta_y: f64) -> Result<()> {
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
@@ -456,7 +576,7 @@ impl TestGpuiRenderer {
                         gpui::px(delta_x as f32),
                         gpui::px(delta_y as f32),
                     )),
-                    modifiers: gpui::Modifiers::default(),
+                    modifiers,
                     touch_phase: gpui::TouchPhase::Moved,
                 },
             );
@@ -480,7 +600,7 @@ impl TestGpuiRenderer {
 
     /// Syntax-cache counters as `[hits, misses, documents]`.
     ///
-    /// GPUI Vue rebuilds its whole element tree every frame, so a `<code>` block
+    /// GPUIX rebuilds its whole element tree every frame, so a `<code>` block
     /// that misses the cache reparses at frame rate. A test can watch the hit
     /// count to catch that regression before a profiler does.
     #[napi]
@@ -504,6 +624,20 @@ impl TestGpuiRenderer {
         Ok(crate::text::painted_text())
     }
 
+    /// Every highlight wash painted in the last frame, in paint order.
+    ///
+    /// A quad is invisible to `getPaintedText()`, so this is the only way to
+    /// assert on `highlight` without a screenshot. Each entry carries its rects,
+    /// so a soft-wrapped match is provably two boxes.
+    #[napi]
+    pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
+        self.flush()?;
+        Ok(crate::text::painted_highlights()
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
     /// Drag-select from one point to another: mouse down, move, up.
     ///
     /// A single helper rather than three calls because the listeners that drive
@@ -513,11 +647,11 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn drag_select(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> Result<()> {
         self.flush()?;
-        self.simulate_mouse_down(x1, y1, None)?;
+        self.simulate_mouse_down(x1, y1, None, None)?;
         self.flush()?;
-        self.simulate_mouse_move(x2, y2, Some(0))?;
+        self.simulate_mouse_move(x2, y2, Some(0), None)?;
         self.flush()?;
-        self.simulate_mouse_up(x2, y2, None)?;
+        self.simulate_mouse_up(x2, y2, None, None)?;
         self.flush()?;
         Ok(())
     }
@@ -617,6 +751,17 @@ impl TestGpuiRenderer {
         })
     }
 
+    /// Same numbers as the on-screen overlay: current, p90, p99, max, frames.
+    #[napi]
+    pub fn get_debug_frame_overlay_stats(&self) -> Result<DebugFrameOverlayStats> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, _app| {
+                debug_frame_overlay_stats_js(window.debug_frame_overlay_stats())
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))
+        })
+    }
+
     /// Get the current scroll offset of a scrollable element.
     /// Returns [x, y] or null if the element has no scroll handle.
     #[napi]
@@ -645,7 +790,7 @@ impl TestGpuiRenderer {
     }
 
     /// Capture a screenshot of the current rendered state and save as PNG.
-    /// macOS only — requires Metal GPU rendering via VisualTestAppContext.
+    /// Supported on macOS through Metal and Windows through DirectX.
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(|cx, window, view| {
@@ -668,7 +813,7 @@ impl TestGpuiRenderer {
 
             cx.run_until_parked();
 
-            // Capture via GPUI's render_to_image (Metal texture → RgbaImage).
+            // Capture via the platform renderer's render_to_image implementation.
             let image = cx
                 .capture_screenshot(window)
                 .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
@@ -748,7 +893,7 @@ impl TestGpuiRenderer {
     pub fn get_automation_tree(&self) -> Result<String> {
         self.flush()?;
         let tree = self.tree.lock().unwrap();
-        let json = tree.to_json(&crate::automation::all_bounds());
+        let json = tree.to_automation_json(&crate::automation::all_bounds());
         serde_json::to_string(&json)
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
     }
@@ -838,6 +983,21 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn get_root_id(&self) -> Option<f64> {
         self.tree.lock().unwrap().root_id.map(|id| id as f64)
+    }
+
+    /// The offscreen window size, so `useWindowSize()` reports the same numbers
+    /// under test as in a real window instead of falling back to a default.
+    #[napi]
+    pub fn get_window_size(&self) -> Result<crate::renderer::WindowSize> {
+        with_test_state(|cx, window, _view| {
+            let size = cx
+                .update_window(window, |_, window, _| window.viewport_size())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(crate::renderer::WindowSize {
+                width: f32::from(size.width) as f64,
+                height: f32::from(size.height) as f64,
+            })
+        })
     }
 
     // ── Private helpers ──────────────────────────────────────────────

@@ -1,8 +1,8 @@
-//! Selectable text: the shared foundation for every text GPUI Vue paints.
+//! Selectable text: the shared foundation for every text GPUIX paints.
 //!
 //! Ported from Comet (https://github.com/zeronsh/comet), MIT.
 //!
-//! Every text node in GPUI Vue goes through [`paint::selectable_text`], so a drag
+//! Every text node in GPUIX goes through [`paint::selectable_text`], so a drag
 //! can start in a plain `<text>` and end inside a `<code>` block. That only
 //! works because all of them register into the same per-frame registry in paint
 //! order. Adding a new text-painting element means calling that helper, never
@@ -10,9 +10,12 @@
 
 pub mod paint;
 pub mod runs;
+pub mod search;
 pub mod selection;
 
 pub use paint::{
-    chrome_text, log_painted_text, painted_text, range_rects, selectable_text,
-    selection_frame_reset, selection_key, SelectableText, SharedSelection,
+    chrome_text, log_painted_text, painted_highlights, painted_text, range_rects,
+    record_start_region, selectable_text, selection_frame_reset, selection_key, HighlightSource,
+    PaintedHighlight, SelectableText, SharedSelection,
 };
+pub use search::{GroupList, HighlightContext, HighlightSet};

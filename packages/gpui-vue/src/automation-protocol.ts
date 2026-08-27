@@ -64,6 +64,7 @@ export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
 
 const point = z.object({ x: z.number(), y: z.number() })
 const mouseButton = z.number().int().min(0).max(2).optional()
+const modifiers = z.string().optional()
 const ok = z.object({ ok: z.literal(true) })
 const now = z.object({ nowMs: z.number() })
 
@@ -82,12 +83,12 @@ export const methods = {
     }),
   },
   cancel: { params: z.object({ id: z.number().int() }), result: ok },
-  click: { params: point.extend({ button: mouseButton }), result: ok },
-  mouseDown: { params: point.extend({ button: mouseButton }), result: ok },
-  mouseUp: { params: point.extend({ button: mouseButton }), result: ok },
-  mouseMove: { params: point.extend({ pressedButton: mouseButton }), result: ok },
+  click: { params: point.extend({ button: mouseButton, modifiers }), result: ok },
+  mouseDown: { params: point.extend({ button: mouseButton, modifiers }), result: ok },
+  mouseUp: { params: point.extend({ button: mouseButton, modifiers }), result: ok },
+  mouseMove: { params: point.extend({ pressedButton: mouseButton, modifiers }), result: ok },
   scrollWheel: {
-    params: point.extend({ deltaX: z.number(), deltaY: z.number() }),
+    params: point.extend({ deltaX: z.number(), deltaY: z.number(), modifiers }),
     result: ok,
   },
   keystrokes: {

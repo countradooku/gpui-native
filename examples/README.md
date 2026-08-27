@@ -4,13 +4,14 @@ Each example is a small native Vue application written as Vue SFCs with
 `<template>` and `<script setup lang="ts">`. They use no browser DOM and no
 JavaScript render loop.
 
-| Example            | SFC                                                  | Demonstrates                                                       | Run                                                     |
-| ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
-| `counter`          | `counter/src/App.vue`                                | Vue reactivity, native input/code, and a motion entrance           | `bun --filter @gpui-vue/example-counter start`          |
-| `canvas`           | `canvas/src/App.vue`                                 | Retained GPU paths, pointer events, and a 4,000-point stress case  | `bun --filter @gpui-vue/example-canvas start`           |
-| `motion-timeline`  | `motion-timeline/src/App.vue`                        | Keyframes, springs, stagger, pause, seek, and playback rate        | `bun --filter @gpui-vue/example-motion-timeline start`  |
-| `multiple-windows` | `multiple-windows/src/{Controller,Inspector}App.vue` | Independent native Vue roots sharing reactive state                | `bun --filter @gpui-vue/example-multiple-windows start` |
-| `audio-buffer`     | `audio-buffer/src/App.vue`                           | Chunked stereo f32 ingestion, dequeue, and bounded-buffer overflow | `bun --filter @gpui-vue/example-audio-buffer start`     |
+| Example            | SFC                                                  | Demonstrates                                                        | Run                                                     |
+| ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------- |
+| `chat`             | `chat/src/App.vue`                                   | Waku-style shell, 5,000-row transcript, native rich text, selectors | `bun --filter @gpui-vue/example-chat start`             |
+| `counter`          | `counter/src/App.vue`                                | Vue reactivity, native input/code, and a motion entrance            | `bun --filter @gpui-vue/example-counter start`          |
+| `canvas`           | `canvas/src/App.vue`                                 | Retained GPU paths, pointer events, and a 4,000-point stress case   | `bun --filter @gpui-vue/example-canvas start`           |
+| `motion-timeline`  | `motion-timeline/src/App.vue`                        | Keyframes, springs, playback controls, and pointer-captured clips   | `bun --filter @gpui-vue/example-motion-timeline start`  |
+| `multiple-windows` | `multiple-windows/src/{Controller,Inspector}App.vue` | Independent native Vue roots sharing reactive state                 | `bun --filter @gpui-vue/example-multiple-windows start` |
+| `audio-buffer`     | `audio-buffer/src/App.vue`                           | Chunked stereo f32 ingestion, dequeue, and bounded-buffer overflow  | `bun --filter @gpui-vue/example-audio-buffer start`     |
 
 Build the native addon, package, and every example from the repository root:
 
@@ -18,6 +19,18 @@ Build the native addon, package, and every example from the repository root:
 bun run build
 bun run build:binaries
 ```
+
+Build the WebAssembly browser gallery for local static hosting:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.127 --locked
+bun run build:pages
+```
+
+GitHub Pages publishes the same artifact at
+[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/). The web gallery uses
+GPUI's single-threaded browser platform, so it does not depend on cross-origin-isolation headers.
 
 Each example build runs strict `vue-tsc` template checking and then compiles a
 small Node-compatible ESM bundle through Vite 8's Rolldown/Oxc pipeline and runs

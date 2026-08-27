@@ -1,7 +1,3 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { mkdir } from "node:fs/promises"
-import path from "node:path"
-
 import {
   AutomationError,
   createSseDecoder,
@@ -20,17 +16,27 @@ import {
   type TreeNode,
 } from "./automation-protocol.js"
 
+function importNodeModule<T>(specifier: string): Promise<T> {
+  return import(specifier)
+}
+
 export interface AutomationBackend {
   call<M extends MethodName>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>>
   close(): Promise<void>
 }
 
 export interface TestAutomationRenderer {
-  nativeSimulateClick(x: number, y: number): void
-  nativeSimulateMouseDown(x: number, y: number, button?: number): void
-  nativeSimulateMouseUp(x: number, y: number, button?: number): void
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void
-  nativeSimulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  nativeSimulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  nativeSimulateMouseDown(x: number, y: number, button?: number, modifiers?: string): void
+  nativeSimulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
+  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
+  nativeSimulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+  ): void
   simulateKeystrokes(keystrokes: string): void
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
   nativeSimulateKeyDown(elementId: number, key: string, isHeld?: boolean): void
@@ -68,8 +74,11 @@ export class InProcessBackend implements AutomationBackend {
       case "initialize":
         result = {
           protocolVersion: PROTOCOL_VERSION,
-          pid: process.pid,
-          capabilities: ["input", "screenshot", "clock", "tree"],
+          pid: typeof process === "undefined" ? 0 : process.pid,
+          capabilities:
+            typeof window === "undefined"
+              ? ["input", "screenshot", "clock", "tree"]
+              : ["input", "clock", "tree"],
           window: { width: 800, height: 600 },
         }
         break
@@ -78,31 +87,42 @@ export class InProcessBackend implements AutomationBackend {
         break
       case "click": {
         const input = parsed as ParamsOf<"click">
-        this.renderer.nativeSimulateClick(input.x, input.y)
+        this.renderer.nativeSimulateClick(input.x, input.y, input.button, input.modifiers)
         result = ok()
         break
       }
       case "mouseDown": {
         const input = parsed as ParamsOf<"mouseDown">
-        this.renderer.nativeSimulateMouseDown(input.x, input.y, input.button)
+        this.renderer.nativeSimulateMouseDown(input.x, input.y, input.button, input.modifiers)
         result = ok()
         break
       }
       case "mouseUp": {
         const input = parsed as ParamsOf<"mouseUp">
-        this.renderer.nativeSimulateMouseUp(input.x, input.y, input.button)
+        this.renderer.nativeSimulateMouseUp(input.x, input.y, input.button, input.modifiers)
         result = ok()
         break
       }
       case "mouseMove": {
         const input = parsed as ParamsOf<"mouseMove">
-        this.renderer.nativeSimulateMouseMove(input.x, input.y, input.pressedButton)
+        this.renderer.nativeSimulateMouseMove(
+          input.x,
+          input.y,
+          input.pressedButton,
+          input.modifiers,
+        )
         result = ok()
         break
       }
       case "scrollWheel": {
         const input = parsed as ParamsOf<"scrollWheel">
-        this.renderer.nativeSimulateScrollWheel(input.x, input.y, input.deltaX, input.deltaY)
+        this.renderer.nativeSimulateScrollWheel(
+          input.x,
+          input.y,
+          input.deltaX,
+          input.deltaY,
+          input.modifiers,
+        )
         result = ok()
         break
       }
@@ -295,6 +315,28 @@ function keySequence(text: string): string {
     .join(" ")
 }
 
+/** A window-space point, or a locator resolved to the centre of its bounds. */
+export type PointTarget = { x: number; y: number } | Locator
+
+export interface MouseOptions {
+  button?: number
+  /** Held modifiers in `press()` syntax, for example `"cmd-shift"`. */
+  modifiers?: string
+}
+
+export interface DragOptions extends MouseOptions {
+  steps?: number
+  offset?: { x: number; y: number }
+}
+
+function centerOf(bounds: ElementBounds): { x: number; y: number } {
+  return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+}
+
+function collectText(node: TreeNode): string {
+  return (node.text ?? "") + (node.children ?? []).map(collectText).join("")
+}
+
 export class Locator {
   constructor(
     readonly app: App,
@@ -342,17 +384,44 @@ export class Locator {
     return result.bounds
   }
 
-  async click(): Promise<void> {
-    const bounds = await this.bounds()
-    await this.app.call("click", {
-      x: bounds.x + bounds.width / 2,
-      y: bounds.y + bounds.height / 2,
-    })
+  async center(): Promise<{ x: number; y: number }> {
+    return centerOf(await this.bounds())
+  }
+
+  async click(options: MouseOptions = {}): Promise<void> {
+    await this.app.mouse.click(this, options)
+  }
+
+  async hover(options: MouseOptions = {}): Promise<void> {
+    await this.app.mouse.move(this, options)
+  }
+
+  async wheel(deltaX: number, deltaY: number, options: MouseOptions = {}): Promise<void> {
+    await this.app.mouse.wheel(this, deltaX, deltaY, options)
+  }
+
+  async dragTo(target: PointTarget, options: DragOptions = {}): Promise<void> {
+    await this.app.mouse.drag(this, target, options)
+  }
+
+  async dragBy(dx: number, dy: number, options: DragOptions = {}): Promise<void> {
+    const start = await this.center()
+    const offset = options.offset ?? { x: 0, y: 0 }
+    await this.app.mouse.drag(
+      this,
+      { x: start.x + offset.x + dx, y: start.y + offset.y + dy },
+      options,
+    )
   }
 
   async fill(text: string): Promise<void> {
     const element = await this.element()
-    const selectAll = process.platform === "darwin" ? "cmd-a" : "ctrl-a"
+    const browserPlatform = typeof navigator === "undefined" ? "" : navigator.platform
+    const selectAll =
+      browserPlatform.includes("Mac") ||
+      (typeof process !== "undefined" && process.platform === "darwin")
+        ? "cmd-a"
+        : "ctrl-a"
     const replacement = text === "" ? "backspace" : keySequence(text)
     await this.app.call("keystrokes", {
       elementId: element.id,
@@ -366,7 +435,7 @@ export class Locator {
   }
 
   async textContent(): Promise<string> {
-    return (await this.element()).text ?? ""
+    return collectText(await this.element())
   }
 
   async waitFor(options: { timeoutMs?: number } = {}): Promise<TreeNode> {
@@ -385,15 +454,90 @@ export class Locator {
 }
 
 export class App {
-  readonly clock = {
-    pause: async (): Promise<number> => (await this.call("clockPause", {})).nowMs,
-    set: async (nowMs: number): Promise<number> => (await this.call("clockSet", { nowMs })).nowMs,
-    fastForward: async (deltaMs: number): Promise<number> =>
-      (await this.call("clockFastForward", { deltaMs })).nowMs,
-    resume: async (): Promise<number> => (await this.call("clockResume", {})).nowMs,
+  readonly clock: {
+    pause: () => Promise<number>
+    set: (nowMs: number) => Promise<number>
+    fastForward: (deltaMs: number) => Promise<number>
+    resume: () => Promise<number>
   }
 
-  constructor(readonly backend: AutomationBackend) {}
+  readonly mouse: {
+    move: (
+      target: PointTarget,
+      options?: MouseOptions & { pressedButton?: number },
+    ) => Promise<void>
+    down: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    up: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    click: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    wheel: (
+      target: PointTarget,
+      deltaX: number,
+      deltaY: number,
+      options?: MouseOptions,
+    ) => Promise<void>
+    drag: (from: PointTarget, to: PointTarget, options?: DragOptions) => Promise<void>
+  }
+
+  constructor(readonly backend: AutomationBackend) {
+    this.mouse = {
+      move: async (target, options = {}) => {
+        const point = await this.#resolvePoint(target)
+        await this.call("mouseMove", {
+          ...point,
+          pressedButton: options.pressedButton,
+          modifiers: options.modifiers,
+        })
+      },
+      down: async (target, options = {}) => {
+        await this.call("mouseDown", { ...(await this.#resolvePoint(target)), ...options })
+      },
+      up: async (target, options = {}) => {
+        await this.call("mouseUp", { ...(await this.#resolvePoint(target)), ...options })
+      },
+      click: async (target, options = {}) => {
+        await this.call("click", { ...(await this.#resolvePoint(target)), ...options })
+      },
+      wheel: async (target, deltaX, deltaY, options = {}) => {
+        await this.call("scrollWheel", {
+          ...(await this.#resolvePoint(target)),
+          deltaX,
+          deltaY,
+          modifiers: options.modifiers,
+        })
+      },
+      drag: async (from, to, options = {}) => {
+        const offset = options.offset ?? { x: 0, y: 0 }
+        const origin = await this.#resolvePoint(from)
+        const start = { x: origin.x + offset.x, y: origin.y + offset.y }
+        const end = await this.#resolvePoint(to)
+        const button = options.button ?? 0
+        const modifiers = options.modifiers
+        const steps = Math.max(1, Math.floor(options.steps ?? 8))
+        await this.call("mouseMove", { ...start, modifiers })
+        await this.call("mouseDown", { ...start, button, modifiers })
+        for (let step = 1; step <= steps; step += 1) {
+          const progress = step / steps
+          await this.call("mouseMove", {
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress,
+            pressedButton: button,
+            modifiers,
+          })
+        }
+        await this.call("mouseUp", { ...end, button, modifiers })
+      },
+    }
+    this.clock = {
+      pause: async () => (await this.call("clockPause", {})).nowMs,
+      set: async (nowMs) => (await this.call("clockSet", { nowMs })).nowMs,
+      fastForward: async (deltaMs) => (await this.call("clockFastForward", { deltaMs })).nowMs,
+      resume: async () => (await this.call("clockResume", {})).nowMs,
+    }
+  }
+
+  async #resolvePoint(target: PointTarget): Promise<{ x: number; y: number }> {
+    return target instanceof Locator ? target.center() : target
+  }
 
   call<M extends MethodName>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>> {
     return this.backend.call(method, params)
@@ -416,6 +560,11 @@ export class App {
   }
 
   async captureFrames(directory: string, timesMs: readonly number[]): Promise<string[]> {
+    if (typeof process === "undefined") {
+      throw new AutomationError("Unsupported", "Browser frame capture uses browser automation")
+    }
+    const { mkdir } = await importNodeModule<typeof import("node:fs/promises")>("node:fs/promises")
+    const path = await importNodeModule<typeof import("node:path")>("node:path")
     await mkdir(directory, { recursive: true })
     await this.clock.pause()
     const files: string[] = []
@@ -434,10 +583,20 @@ export class App {
 }
 
 export interface LiveAutomationRenderer {
-  simulateClick(x: number, y: number, button?: number): void
-  simulateMouseDown(x: number, y: number, button?: number): void
-  simulateMouseUp(x: number, y: number, button?: number): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseDown(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+  ): void
+  simulateKeystrokes?(keystrokes: string): void
+  simulateKeyDown?(keystroke: string, isHeld?: boolean): void
+  simulateKeyUp?(keystroke: string): void
   tick?(): void
   focusElement(elementId: number): void
   blur(): void
@@ -447,7 +606,7 @@ export interface LiveAutomationRenderer {
   getPaintedText(): string[]
   getSelectedText(): string | null
   clearSelection(): void
-  captureScreenshot(path: string): void
+  captureScreenshot?(path: string): void
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -457,32 +616,59 @@ export interface LiveAutomationRenderer {
 }
 
 export function liveRendererAsTest(renderer: LiveAutomationRenderer): TestAutomationRenderer {
-  const unsupported = (name: string): never => {
-    throw new AutomationError("Unsupported", `${name} is not available for live automation`)
-  }
   const afterInput = (): void => renderer.tick?.()
   return {
-    nativeSimulateClick(x, y) {
-      renderer.simulateClick(x, y)
+    nativeSimulateClick(x, y, button, modifiers) {
+      renderer.simulateClick(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseDown(x, y, button) {
-      renderer.simulateMouseDown(x, y, button)
+    nativeSimulateMouseDown(x, y, button, modifiers) {
+      renderer.simulateMouseDown(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseUp(x, y, button) {
-      renderer.simulateMouseUp(x, y, button)
+    nativeSimulateMouseUp(x, y, button, modifiers) {
+      renderer.simulateMouseUp(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseMove(x, y, pressedButton) {
-      renderer.simulateMouseMove(x, y, pressedButton)
+    nativeSimulateMouseMove(x, y, pressedButton, modifiers) {
+      renderer.simulateMouseMove(x, y, pressedButton, modifiers)
       afterInput()
     },
-    nativeSimulateScrollWheel: () => unsupported("scrollWheel"),
-    simulateKeystrokes: () => unsupported("keystrokes"),
-    nativeSimulateKeystrokes: () => unsupported("keystrokes"),
-    nativeSimulateKeyDown: () => unsupported("keyDown"),
-    nativeSimulateKeyUp: () => unsupported("keyUp"),
+    nativeSimulateScrollWheel(x, y, deltaX, deltaY, modifiers) {
+      renderer.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+      afterInput()
+    },
+    simulateKeystrokes(keys) {
+      if (renderer.simulateKeystrokes === undefined) {
+        throw new AutomationError("Unsupported", "keystrokes are not live yet")
+      }
+      renderer.simulateKeystrokes(keys)
+      afterInput()
+    },
+    nativeSimulateKeystrokes(elementId, keys) {
+      if (renderer.simulateKeystrokes === undefined) {
+        throw new AutomationError("Unsupported", "keystrokes are not live yet")
+      }
+      renderer.focusElement(elementId)
+      renderer.simulateKeystrokes(keys)
+      afterInput()
+    },
+    nativeSimulateKeyDown(elementId, key, isHeld) {
+      if (renderer.simulateKeyDown === undefined) {
+        throw new AutomationError("Unsupported", "keyDown is not live yet")
+      }
+      if (elementId > 0) renderer.focusElement(elementId)
+      renderer.simulateKeyDown(key, isHeld)
+      afterInput()
+    },
+    nativeSimulateKeyUp(elementId, key) {
+      if (renderer.simulateKeyUp === undefined) {
+        throw new AutomationError("Unsupported", "keyUp is not live yet")
+      }
+      if (elementId > 0) renderer.focusElement(elementId)
+      renderer.simulateKeyUp(key)
+      afterInput()
+    },
     scrollTo: (id, x, y) => renderer.scrollTo(id, x, y),
     getScrollOffset: (id) => {
       const value = renderer.getScrollOffset(id)
@@ -492,7 +678,12 @@ export function liveRendererAsTest(renderer: LiveAutomationRenderer): TestAutoma
     getPaintedText: () => renderer.getPaintedText(),
     getSelectedText: () => renderer.getSelectedText(),
     clearSelection: () => renderer.clearSelection(),
-    captureScreenshot: (file) => renderer.captureScreenshot(file),
+    captureScreenshot(file) {
+      if (renderer.captureScreenshot === undefined) {
+        throw new AutomationError("Unsupported", "Browser screenshots use browser automation")
+      }
+      renderer.captureScreenshot(file)
+    },
     getAutomationTree: () => renderer.getAutomationTree(),
     getElementBounds: (id) => renderer.getElementBounds(id),
     clockPause: () => renderer.clockPause(),
@@ -531,7 +722,9 @@ export async function launch(options: {
   cwd?: string
   env?: NodeJS.ProcessEnv
 }): Promise<App> {
-  const child: ChildProcessWithoutNullStreams = spawn(options.command, options.args ?? [], {
+  const { spawn } =
+    await importNodeModule<typeof import("node:child_process")>("node:child_process")
+  const child = spawn(options.command, options.args ?? [], {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
     stdio: ["pipe", "pipe", "pipe"],

@@ -1,8 +1,11 @@
 import type {
   AudioBufferState,
+  DebugFrameOverlayStats,
   DebugFrameOverlayMode,
   EventPayload,
   GpuiElementType,
+  HighlightMatch,
+  NativeWindowInsets,
   NativeWindowOptions,
   StyleDesc,
   TimelineState,
@@ -38,6 +41,7 @@ export interface NativeRenderer {
   requiresTick?(): boolean
   tick?(): boolean
   getWindowSize?(): WindowSize
+  getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
   focusElement?(elementId: NativeNodeId): void
   blur?(): void
@@ -50,15 +54,27 @@ export interface NativeRenderer {
   cycleDebugFrameOverlay?(): string
   getDebugFrameOverlay?(): string
   resetDebugFrameOverlayStats?(): void
+  getDebugFrameOverlayStats?(): DebugFrameOverlayStats
   getAutomationTree?(): string
   snapshotJson?(): string
   getElementBounds?(id: NativeNodeId): number[] | null
   getAllText?(): string[]
   getPaintedText?(): string[]
-  simulateClick?(x: number, y: number, button?: number): void
-  simulateMouseDown?(x: number, y: number, button?: number): void
-  simulateMouseUp?(x: number, y: number, button?: number): void
-  simulateMouseMove?(x: number, y: number, pressedButton?: number): void
+  getPaintedHighlights?(): HighlightMatch[]
+  simulateKeystrokes?(keystrokes: string): void
+  simulateKeyDown?(keystroke: string, isHeld?: boolean): void
+  simulateKeyUp?(keystroke: string): void
+  simulateClick?(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseDown?(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseUp?(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseMove?(x: number, y: number, pressedButton?: number, modifiers?: string): void
+  simulateScrollWheel?(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+  ): void
   clockPause?(): number
   clockSet?(nowMs: number): number
   clockFastForward?(deltaMs: number): number
@@ -218,6 +234,19 @@ export class MemoryNativeRenderer implements NativeRenderer {
 
   applyBatch(json: string): NativeNodeId[] {
     const operations = JSON.parse(json) as BatchTuple[]
+    const staged = this.#cloneTree()
+    const destroyed = staged.#applyOperations(operations)
+
+    this.nodes.clear()
+    for (const [id, node] of staged.nodes) this.nodes.set(id, node)
+    this.scrollOffsets.clear()
+    for (const [id, offset] of staged.scrollOffsets) this.scrollOffsets.set(id, offset)
+    this.rootId = staged.rootId
+    this.commitCount += 1
+    return destroyed
+  }
+
+  #applyOperations(operations: BatchTuple[]): NativeNodeId[] {
     const destroyed: NativeNodeId[] = []
 
     for (const [operation, ...args] of operations) {
@@ -263,7 +292,6 @@ export class MemoryNativeRenderer implements NativeRenderer {
           throw new Error(`Unknown native batch operation: ${operation}`)
       }
     }
-    this.commitCount += 1
     return destroyed
   }
 
@@ -293,6 +321,11 @@ export class MemoryNativeRenderer implements NativeRenderer {
 
   getWindowSize(): WindowSize {
     return { ...this.windowSize }
+  }
+
+  getWindowInsets(): NativeWindowInsets {
+    const zero = { top: 0, right: 0, bottom: 0, left: 0 }
+    return { safeArea: { ...zero }, ime: { ...zero }, effective: { ...zero } }
   }
 
   setWindowTitle(title: string): void {
@@ -348,6 +381,10 @@ export class MemoryNativeRenderer implements NativeRenderer {
   }
 
   resetDebugFrameOverlayStats(): void {}
+
+  getDebugFrameOverlayStats(): DebugFrameOverlayStats {
+    return { frames: 0, samples: 0 }
+  }
 
   clockPause(): number {
     return this.timelinePause().currentTimeMs
@@ -457,6 +494,14 @@ export class MemoryNativeRenderer implements NativeRenderer {
     return text
   }
 
+  getPaintedText(): string[] {
+    return this.getAllText()
+  }
+
+  getPaintedHighlights(): HighlightMatch[] {
+    return []
+  }
+
   getTreeJson(): string {
     return JSON.stringify({
       rootId: this.rootId,
@@ -500,6 +545,22 @@ export class MemoryNativeRenderer implements NativeRenderer {
 
   emit(event: EventPayload): void {
     this.eventCallback?.(null, event)
+  }
+
+  #cloneTree(): MemoryNativeRenderer {
+    const clone = new MemoryNativeRenderer()
+    clone.rootId = this.rootId
+    for (const [id, node] of this.nodes) {
+      clone.nodes.set(id, {
+        ...node,
+        style: { ...node.style },
+        events: new Set(node.events),
+        children: [...node.children],
+        customProps: { ...node.customProps },
+      })
+    }
+    for (const [id, offset] of this.scrollOffsets) clone.scrollOffsets.set(id, [...offset])
+    return clone
   }
 
   #setCustomPropValue(id: NativeNodeId, key: string, value: unknown): void {

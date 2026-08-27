@@ -3,6 +3,7 @@ import {
   MotionDiv,
   stagger,
   useGpuiTimeline,
+  type EventPayload,
   type MotionKeyframe,
   type MotionTransition,
   type StyleDesc,
@@ -101,6 +102,49 @@ const timelineText = computed(() => {
   return `${status} · ${snapshot.value.currentTimeMs.toFixed(0)} ms · ${snapshot.value.playbackRate.toFixed(1)}×`
 })
 
+const clips = ref([
+  { id: 1, label: "Opening", left: 18, width: 190, color: colors.blue },
+  { id: 2, label: "Interview", left: 230, width: 280, color: colors.green },
+  { id: 3, label: "B-roll", left: 530, width: 150, color: colors.pink },
+])
+const drag = ref<{ id: number; pointerX: number; clipLeft: number } | null>(null)
+
+function clipStyle(clip: (typeof clips.value)[number]): StyleDesc {
+  return {
+    position: "absolute",
+    left: clip.left,
+    top: 18,
+    width: clip.width,
+    height: 54,
+    padding: 12,
+    borderRadius: 8,
+    background: clip.color,
+    color: "#071019",
+    fontWeight: 700,
+    cursor: drag.value?.id === clip.id ? "grabbing" : "grab",
+    boxShadow: {
+      offsetX: 0,
+      offsetY: 5,
+      blurRadius: 12,
+      spreadRadius: 0,
+      color: "#00000055",
+    },
+  }
+}
+
+function startDrag(clip: (typeof clips.value)[number], event: EventPayload): void {
+  drag.value = { id: clip.id, pointerX: event.x ?? 0, clipLeft: clip.left }
+}
+
+function moveDrag(clip: (typeof clips.value)[number], event: EventPayload): void {
+  if (drag.value?.id !== clip.id) return
+  clip.left = Math.max(0, drag.value.clipLeft + (event.x ?? 0) - drag.value.pointerX)
+}
+
+function endDrag(): void {
+  drag.value = null
+}
+
 function update(next: TimelineState): void {
   snapshot.value = next
 }
@@ -147,6 +191,33 @@ function update(next: TimelineState): void {
       :transition="runnerTransition"
       :style="runnerStyle"
     />
+
+    <div :style="{ fontSize: 15, fontWeight: 650 }">Pointer-captured editor clips</div>
+    <div
+      testId="clip-track"
+      :style="{
+        position: 'relative',
+        width: '100%',
+        height: 90,
+        overflow: 'hidden',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#26344a',
+        background: '#0d1420',
+      }"
+    >
+      <div
+        v-for="clip in clips"
+        :key="clip.id"
+        :testId="`clip-${clip.id}`"
+        :style="clipStyle(clip)"
+        @mouse-down="startDrag(clip, $event)"
+        @mouse-move="moveDrag(clip, $event)"
+        @mouse-up="endDrag"
+      >
+        {{ clip.label }}
+      </div>
+    </div>
 
     <div :style="{ color: colors.muted }">{{ timelineText }}</div>
     <div :style="{ display: 'flex', flexWrap: 'wrap', gap: 9 }">

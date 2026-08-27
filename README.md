@@ -1,6 +1,7 @@
 # gpui-vue
 
 [![CI](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml)
+[![GitHub Pages](https://github.com/countradooku/gpui-vue/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-vue/)
 
 Vue 3 bindings for [Zed's GPUI](https://gpui.rs/), implemented as a Vue custom renderer and a full native Rust component runtime.
 
@@ -40,6 +41,7 @@ const App = defineComponent({
           code: source.value,
           language: "typescript",
           showLineNumbers: true,
+          style: { padding: 12, background: "#111827", borderRadius: 8 },
         }),
       ])
   },
@@ -58,7 +60,7 @@ render(App, { title: "My Vue app", width: 800, height: 600 })
 | `input`, `textarea` | `GpuiInput`, `GpuiTextarea`  | Native editable GPUI text, caret, selection, clipboard, IME, submit/change events, read-only mode, and `v-model`    |
 | `img`, `svg`        | `GpuiImage`, `GpuiSvg`       | Native image loading, object-fit, fallback content, and tinted SVG data                                             |
 | `anchored`          | `GpuiAnchored`               | Deferred anchored layers with side/alignment, offsets, collision switching/snapping, priority, and occlusion        |
-| `code`              | `GpuiCode`                   | Tree-sitter language detection, cached syntax highlighting, headers, line numbers, and selectable code              |
+| `code`              | `GpuiCode`                   | Syntect language detection, cached syntax highlighting, optional line numbers, horizontal scrolling, and selection  |
 | `diff`              | `GpuiDiff`                   | Unified-diff parsing, word highlights, collapsed files, show-more rows, line events, and optional virtual scrolling |
 | `markdown`          | `GpuiMarkdown`               | GFM parsing, headings, lists, tables, tasks, inline code, fenced code highlighting, selection, and link events      |
 | `virtual-list`      | `GpuiVirtualList`            | Variable-height GPUI list virtualization, overdraw, alignment, follow-tail, and imperative scrolling                |
@@ -93,14 +95,20 @@ The controls support controlled props and Vue update events such as `onUpdate:va
 | `patchProp(custom)`             | Sends typed native-element props to the Rust factory registry                     |
 | `parentNode` / `nextSibling`    | Serves Vue keyed diffing, fragments, and component moves from local host links    |
 
-Vue patch waves are coalesced into one `applyBatch()` N-API call. The native renderer updates the retained tree under one lock and invalidates GPUI once per commit.
+Vue patch waves are coalesced into one `applyBatch()` N-API call. Rust decodes
+the tuples into typed operations before touching the tree, so a malformed batch
+applies nothing. Equal style payloads share one retained allocation and unused
+styles are swept after commits. The tree is updated under one lock and GPUI is
+invalidated once per commit.
 
 ## Composables
 
 - `useGpuiRequired()` returns the current renderer.
-- `useGpuiWindow()` exposes size, title, focus, blur, selection, scrolling, and debug-overlay controls.
+- `useGpuiWindow()` exposes size/insets, title, focus, blur, selection, highlights, scrolling, and debug-overlay controls.
 - `useElementRef()` returns a typed template ref for native elements.
-- `useWindowSize()` reads the native window size.
+- `useWindowSize()` polls the native window size; pass `{ intervalMs: false }` for one read.
+- `useWindowInsets()` polls safe-area and software-keyboard geometry and derives the visible content height.
+- `useTextSearch()` drives a find cursor through the native `highlight` prop; `findRanges()` uses the same Unicode matcher for virtualized rows.
 - `useGpuiTimeline()` controls the live native animation clock: play, pause, seek, and playback rate.
 - `useGpuiAudioFrames()` feeds bounded, interleaved decoded `Float32Array` PCM chunks to the native runtime.
 
@@ -180,7 +188,42 @@ app.unmount()
 
 For native automation, `GpuiAutomation` exposes normalized tree snapshots, test-id/type lookup, bounds, native clicking and mouse input, deterministic clock control, painted text, and screenshots. `snapshotRenderer()` accepts both the memory renderer's indexed shape and the native renderer's nested tree.
 
-The `gpui-vue/automation` export also provides the parity Playwright-style API: `App`, `Locator`, `connectTest()`, `connectStdio()`, `launch()`, the typed versioned request catalog, SSE codecs, and `enableAutomation()` for serving a live renderer over stdin/stdout. On macOS, builds include GPUI's GPU-backed `TestGpuiRenderer`; use `hasNativeTestRenderer` and `createTestRoot()` for real layout, hit-testing, keyboard input, selection, scrolling, painted-text, clock, and screenshot tests.
+`createTestRoot({ width, height })` sizes the GPU-backed offscreen window for
+layout and wrapping tests; its native default remains 1280×800.
+
+The `gpui-vue/automation` export also provides the parity Playwright-style API: `App`, `Locator`, `connectTest()`, `connectStdio()`, `launch()`, the typed versioned request catalog, SSE codecs, and `enableAutomation()` for serving a live renderer over stdin/stdout. macOS and Windows test-support builds include GPUI's GPU-backed `TestGpuiRenderer`; use `hasNativeTestRenderer` and `createTestRoot()` for real layout, hit-testing, keyboard input, selection, scrolling, painted-text, clock, and screenshot tests.
+
+Locators support clicks, auxiliary buttons, hover, wheel input, text entry, held
+modifier keys, and stepped drag gestures. Live desktop and WebAssembly renderers
+share the same keyboard, pointer, scroll, focus, and deterministic-clock hooks.
+
+## Text search and virtual lists
+
+Declare `highlight` on any container to search its retained text subtree. The
+native renderer reports `matchCount`, paints the active result separately, and
+exposes the last frame through `useGpuiWindow().paintedHighlights()`:
+
+```ts
+const query = ref("")
+const search = useTextSearch({ query })
+
+return () =>
+  h("div", search.props.value, [
+    h(
+      "text",
+      null,
+      search.total.value === 0 ? "No matches" : `${search.active.value + 1}/${search.total.value}`,
+    ),
+    h("div", null, documentText),
+  ])
+```
+
+For a windowed `virtual-list`, supply `itemCount`, `estimatedItemHeight`, and
+the mounted data's `windowStart`. `onVisibleRange` reports the visible index
+interval. Scroll anchoring is index-based: when rows are prepended, update
+`windowStart` with the data window so the same logical row stays pinned. If
+searching rows that are not mounted, sum `findRanges()` above the window and
+pass `{ total, indexOffset }` to `useTextSearch()`.
 
 ## Build
 
@@ -188,6 +231,7 @@ The `gpui-vue/automation` export also provides the parity Playwright-style API: 
 bun install
 bun run build
 bun run build:binaries
+bun run build:pages
 bun run test
 bun run check
 bun --filter @gpui-vue/example-canvas start
@@ -200,9 +244,21 @@ TypeScript and `vue-tsc` remain enabled for declaration generation and strict ty
 `bun run build:binaries` additionally embeds each example and its host-platform N-API addon
 into a standalone executable under that example's `dist/` directory.
 
-CI runs the Oxc, Vue, TypeScript, and Rust checks plus a six-target native matrix for macOS,
-Linux, and Windows. Pushing a version tag such as `v0.1.0` creates a GitHub Release containing
-all six native bindings after the downloaded macOS binding passes its headless smoke test.
+`bun run build:pages` compiles the retained Rust renderer against GPUI's single-threaded browser
+platform, generates its `wasm-bindgen` browser bridge, and creates the example gallery under
+`dist-pages/`. Install `wasm32-unknown-unknown` and the `wasm-bindgen-cli` version recorded in
+`Cargo.lock` before running it locally. The deployed gallery is available at
+[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/).
+
+Native builds use Syntect's Oniguruma engine; WebAssembly uses its pure-Rust
+fancy-regex engine. Both targets therefore retain the same syntax definitions
+and visual highlighting. Multiple native windows are represented by independent
+canvases in the browser example.
+
+CI runs the Oxc, Vue, TypeScript, and Rust checks plus one native target per OS:
+Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
+`v0.1.0` creates a GitHub Release containing those bindings after the downloaded
+macOS binding passes its headless smoke test.
 See [`examples/README.md`](./examples/README.md) for runnable canvas,
 motion/timeline, multi-window, audio-buffer, and counter demos. Pass
 `{ headless: true }` to `renderer.init()` when a retained tree is needed

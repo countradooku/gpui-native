@@ -56,7 +56,14 @@ export declare class GpuiRenderer {
   isInitialized(): boolean
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
+  /**
+   * The paintable size of the window in logical pixels, excluding any
+   * platform title bar. This used to answer a hardcoded 800x600, so anything
+   * that turned a mouse position into layout coordinates pointed at the
+   * wrong place on every window that was not exactly that size.
+   */
   getWindowSize(): WindowSize
+  getWindowInsets(): WindowInsets
   /**
    * Stop the native event loop and release the window. This explicit
    * lifecycle hook lets Vue unmount or hot-remount without keeping Node's
@@ -70,6 +77,8 @@ export declare class GpuiRenderer {
   getDebugFrameOverlay(): string
   /** Clears the last 1000 draw samples. Frame count stays. */
   resetDebugFrameOverlayStats(): void
+  /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
+  getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -93,10 +102,28 @@ export declare class GpuiRenderer {
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
-  simulateClick(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  /**
+   * Every highlight wash painted in the last frame, in paint order.
+   *
+   * A quad is invisible to `getPaintedText()`, so this is the only way to
+   * assert on `highlight` without a screenshot.
+   */
+  getPaintedHighlights(): Array<HighlightMatch>
+  /** Simulate space-separated keystrokes through the focused element's input pipeline. */
+  simulateKeystrokes(keystrokes: string): void
+  simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
+  simulateKeyUp(keystroke: string): void
+  /** `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt". */
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
+  /**
+   * Dispatch a wheel event through the same GPUI hit test the trackpad uses.
+   * Deltas are pixels: negative `delta_y` scrolls down, negative `delta_x`
+   * pans right, matching `TestGpuiRenderer::simulate_scroll_wheel`.
+   */
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -123,6 +150,23 @@ export interface AudioBufferState {
   capacityFrames: number
   queuedFrames: number
   droppedFrames: number
+}
+
+/** Recorded draw times from the debug frame overlay. */
+export interface DebugFrameOverlayStats {
+  currentMs?: number
+  p90Ms?: number
+  p99Ms?: number
+  maxMs?: number
+  frames: number
+  samples: number
+}
+
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
 }
 
 export interface EventModifiers {
@@ -218,7 +262,46 @@ export interface EventPayload {
   oldLine?: number
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */
   newLine?: number
+  /** First visible logical index. Populated for: `<virtual-list>` visibleRange. */
+  startIndex?: number
+  /** Exclusive end of the visible logical range. Populated for: visibleRange. */
+  endIndex?: number
+  /**
+   * Matches found by this element's `highlight` prop. Counted once per match
+   * even when it is split across several painted runs, and it counts every
+   * retained match, not only the ones currently on screen.
+   * Populated for: highlight.
+   */
+  matchCount?: number
   modifiers?: EventModifiers
+}
+
+/**
+ * One highlight wash painted in the last frame, with the boxes it drew.
+ *
+ * The rects matter: a quad never lands in `getPaintedText()`, and a match that
+ * soft-wraps must produce one box per visual row. Without the geometry the only
+ * way to assert either is a screenshot.
+ */
+export interface HighlightMatch {
+  /** Numeric id of the element that painted the run. */
+  elementId: number
+  /** Index of the run within that element. 0 for a plain `<text>`. */
+  sub: number
+  /** The full string of the run, so `text.slice(start, end)` is the match. */
+  text: string
+  /** UTF-16 code-unit offsets into `text`, the units JS strings use. */
+  start: number
+  end: number
+  active: boolean
+  rects: Array<HighlightRect>
+}
+
+export interface HighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface TimelineState {
@@ -227,10 +310,22 @@ export interface TimelineState {
   playing: boolean
 }
 
+export interface WindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
+}
+
 export interface WindowOptions {
   /** Retain and query the native tree without opening a platform window. */
   headless?: boolean
   title?: string
+  /**
+   * The name used inside the macOS "Hide" and "Quit" menu items. Defaults to
+   * `title`. It does NOT set the title of the application menu itself: macOS
+   * takes that from the executable, and only a `.app` bundle changes it.
+   */
+  appName?: string
   width?: number
   height?: number
   minWidth?: number

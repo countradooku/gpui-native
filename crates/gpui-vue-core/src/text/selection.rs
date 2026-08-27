@@ -5,7 +5,7 @@
 //!
 //! GPUI has no built-in selection for plain text. Zed's markdown selects
 //! continuously because its whole document is ONE element over one text model.
-//! GPUI Vue renders a TREE of text elements, so this module rebuilds that
+//! GPUIX renders a TREE of text elements, so this module rebuilds that
 //! continuity: every frame the renderer registers each painted text element in
 //! paint order (which IS document order), and a drag anchored in one element
 //! resolves against that registry into per-element SPANS — partial in the anchor
@@ -17,7 +17,7 @@
 //! [`super::paint`].
 //!
 //! Difference from Comet: the state lives in a `SelectionState` value owned by
-//! `GpuiView` instead of a process-global. GPUI Vue is a library and a process may
+//! `GpuiView` instead of a process-global. GPUIX is a library and a process may
 //! host more than one renderer, so a global would let two windows fight over one
 //! selection.
 
@@ -34,6 +34,24 @@ pub struct Span {
     /// The element's full flat text. Snapshotted at drag time so copy still
     /// works after the element scrolls out of the registry.
     pub text: String,
+    /// See [`RegisteredText::group`].
+    pub group: Option<u64>,
+}
+
+/// One painted text element as the frame registry sees it.
+#[derive(Clone, Copy, Debug)]
+pub struct RegisteredText<'a> {
+    pub key: &'a str,
+    pub text: &'a str,
+    /// Id of the host element whose primitive text children this run belongs
+    /// to, or `None` for a run that never merges with a neighbour.
+    ///
+    /// Vue makes a separate host node for every interpolated string
+    /// (`shouldSetTextContent` is false), so `<text>Hello {name}!</text>` is
+    /// three painted runs of one logical line. They share a group, and copy
+    /// must join them with nothing. Anything else is a separate line and joins
+    /// with a newline.
+    pub group: Option<u64>,
 }
 
 /// Live selection for one renderer.
@@ -47,16 +65,42 @@ pub struct SelectionState {
     /// Resolved spans in document order. Empty while a click has not moved.
     spans: Vec<Span>,
     active: bool,
+    /// Mouse-down hit that has not become a drag yet. A tap must not select
+    /// or blur; iOS treats that tap as scroll or focus. Promoted on the first
+    /// dragging move, or replaced by `begin_with_span` for double-click.
+    pending: bool,
 }
 
 impl SelectionState {
-    /// Begin a drag anchored at `(key, ix)`.
-    pub fn begin(&mut self, key: &str, ix: usize) {
+    /// Remember a press without selecting. The next dragging move promotes it.
+    pub fn arm(&mut self, key: &str, ix: usize) {
         self.anchor_key = key.to_string();
         self.anchor_ix = ix;
+        self.dragging = false;
+        self.active = false;
+        self.pending = true;
+        self.spans.clear();
+    }
+
+    /// Turn a pending press into a live drag. True when this call started it.
+    pub fn promote_pending_for(&mut self, key: &str) -> bool {
+        if !self.pending || self.anchor_key != key {
+            return false;
+        }
+        self.pending = false;
         self.dragging = true;
         self.active = true;
-        self.spans.clear();
+        true
+    }
+
+    pub fn cancel_pending(&mut self) {
+        if self.pending {
+            *self = SelectionState::default();
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.pending
     }
 
     /// Begin with an immediate span — double or triple click inside one element.
@@ -65,10 +109,12 @@ impl SelectionState {
         self.anchor_ix = range.start;
         self.dragging = true;
         self.active = true;
+        self.pending = false;
         self.spans = vec![Span {
             key: key.to_string(),
             range,
             text: text.to_string(),
+            group: None,
         }];
     }
 
@@ -99,19 +145,12 @@ impl SelectionState {
         Some(join_spans(&self.spans))
     }
 
-    /// Clear when `key` owns a settled selection. A mouse-down landed outside
-    /// the owner; the element the down landed IN claims right after. Returns
-    /// true when something was cleared.
-    pub fn clear_if_owner(&mut self, key: &str) -> bool {
-        if self.active && self.anchor_key == key && !self.dragging {
-            self.clear();
-            return true;
-        }
-        false
-    }
-
     pub fn clear(&mut self) {
         *self = SelectionState::default();
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
     }
 
     /// The wash range for `key` this frame. `None` means nothing to paint.
@@ -135,24 +174,30 @@ impl SelectionState {
 }
 
 /// Resolve the spans for a selection between `a` and `b`, each an
-/// `(element index, byte offset)` into `elements` (document-ordered
-/// `(key, text)` pairs). Handles either direction; empty slices are skipped.
-pub fn resolve_spans(elements: &[(&str, &str)], a: (usize, usize), b: (usize, usize)) -> Vec<Span> {
+/// `(element index, byte offset)` into `elements` (document-ordered painted
+/// runs). Handles either direction; empty slices are skipped.
+pub fn resolve_spans(
+    elements: &[RegisteredText],
+    a: (usize, usize),
+    b: (usize, usize),
+) -> Vec<Span> {
     let (start, end) = if (a.0, a.1) <= (b.0, b.1) {
         (a, b)
     } else {
         (b, a)
     };
     let mut spans = Vec::new();
-    for (ei, (key, text)) in elements.iter().enumerate().take(end.0 + 1).skip(start.0) {
+    for (ei, entry) in elements.iter().enumerate().take(end.0 + 1).skip(start.0) {
+        let text = entry.text;
         let from = if ei == start.0 { start.1 } else { 0 };
         let to = if ei == end.0 { end.1 } else { text.len() };
         let (from, to) = (clamp_boundary(text, from), clamp_boundary(text, to));
         if from < to {
             spans.push(Span {
-                key: (*key).to_string(),
+                key: entry.key.to_string(),
                 range: from..to,
-                text: (*text).to_string(),
+                text: text.to_string(),
+                group: entry.group,
             });
         }
     }
@@ -170,13 +215,25 @@ fn clamp_boundary(text: &str, mut ix: usize) -> usize {
     ix
 }
 
+/// Join spans in document order, with a newline between logical lines and
+/// nothing between runs of the same group.
+///
+/// Without the group check, copying `<text>Hello {name}!</text>` yields
+/// `"Hello\nTommy\n!"`, because Vue split one line into three host nodes.
 fn join_spans(spans: &[Span]) -> String {
-    spans
-        .iter()
-        .filter(|s| !s.range.is_empty())
-        .map(|s| &s.text[s.range.clone()])
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = String::new();
+    let mut previous: Option<Option<u64>> = None;
+    for span in spans.iter().filter(|s| !s.range.is_empty()) {
+        if let Some(previous) = previous {
+            let same_group = span.group.is_some() && span.group == previous;
+            if !same_group {
+                out.push('\n');
+            }
+        }
+        out.push_str(&span.text[span.range.clone()]);
+        previous = Some(span.group);
+    }
+    out
 }
 
 /// Word range around `ix` for double-click selection: an alphanumeric/`_` run,
@@ -212,11 +269,24 @@ pub fn word_range(text: &str, ix: usize) -> Range<usize> {
 mod tests {
     use super::*;
 
-    fn elems<'a>() -> Vec<(&'a str, &'a str)> {
+    fn reg<'a>(key: &'a str, text: &'a str, group: Option<u64>) -> RegisteredText<'a> {
+        RegisteredText { key, text, group }
+    }
+
+    fn elems<'a>() -> Vec<RegisteredText<'a>> {
         vec![
-            ("p1", "first paragraph"),
-            ("p2", "second"),
-            ("p3", "third one"),
+            reg("p1", "first paragraph", None),
+            reg("p2", "second", None),
+            reg("p3", "third one", None),
+        ]
+    }
+
+    /// `<text>Hello {name}!</text>`: one line, three host nodes, one group.
+    fn interpolated<'a>() -> Vec<RegisteredText<'a>> {
+        vec![
+            reg("2:0", "Hello ", Some(1)),
+            reg("3:0", "Tommy", Some(1)),
+            reg("4:0", "!", Some(1)),
         ]
     }
 
@@ -242,7 +312,8 @@ mod tests {
     #[test]
     fn drag_lifecycle_and_copy_joins() {
         let mut sel = SelectionState::default();
-        sel.begin("p1", 6);
+        sel.arm("p1", 6);
+        assert!(sel.promote_pending_for("p1"));
         assert_eq!(sel.drag_anchor("p1"), Some(6));
         assert_eq!(sel.drag_anchor("p2"), None);
         let spans = resolve_spans(&elems(), (0, 6), (1, 6));
@@ -253,17 +324,42 @@ mod tests {
         assert_eq!(sel.wash_range("p3"), None);
         assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph\nsecond"));
         assert_eq!(sel.selected_text().as_deref(), Some("paragraph\nsecond"));
-        assert!(!sel.clear_if_owner("p2"));
-        assert!(sel.clear_if_owner("p1"));
+        sel.clear();
         assert_eq!(sel.selected_text(), None);
     }
 
     #[test]
     fn empty_click_clears_on_release() {
         let mut sel = SelectionState::default();
-        sel.begin("p1", 3);
+        sel.arm("p1", 3);
+        assert!(sel.promote_pending_for("p1"));
         assert_eq!(sel.end_drag("p1"), None);
         assert_eq!(sel.selected_text(), None);
+    }
+
+    #[test]
+    fn tap_does_not_select_until_drag() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 3);
+        assert!(sel.is_pending());
+        assert!(!sel.is_active());
+        assert_eq!(sel.drag_anchor("p1"), None);
+        sel.cancel_pending();
+        assert!(!sel.is_pending());
+        assert_eq!(sel.selected_text(), None);
+    }
+
+    #[test]
+    fn pending_press_promotes_on_drag() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 6);
+        assert!(!sel.promote_pending_for("p2"));
+        assert!(sel.promote_pending_for("p1"));
+        assert!(!sel.promote_pending_for("p1"));
+        assert_eq!(sel.drag_anchor("p1"), Some(6));
+        let spans = resolve_spans(&elems(), (0, 6), (0, 15));
+        assert!(sel.update_spans(spans));
+        assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph"));
     }
 
     #[test]
@@ -290,7 +386,54 @@ mod tests {
     /// A stale index past a shrunk element's text must clamp, not panic.
     #[test]
     fn resolve_spans_clamps_out_of_range_offsets() {
-        let spans = resolve_spans(&[("a", "hé")], (0, 0), (0, 99));
+        let spans = resolve_spans(&[reg("a", "hé", None)], (0, 0), (0, 99));
         assert_eq!(&spans[0].text[spans[0].range.clone()], "hé");
+    }
+
+    /// Vue splits one line into three host nodes. Copy must not insert
+    /// newlines between them.
+    #[test]
+    fn copy_joins_one_group_without_newlines() {
+        let mut sel = SelectionState::default();
+        sel.arm("2:0", 0);
+        assert!(sel.promote_pending_for("2:0"));
+        let spans = resolve_spans(&interpolated(), (0, 0), (2, 1));
+        assert!(sel.update_spans(spans));
+        assert_eq!(sel.selected_text().as_deref(), Some("Hello Tommy!"));
+    }
+
+    #[test]
+    fn copy_separates_groups_with_newlines() {
+        let elements = vec![
+            reg("2:0", "Hello ", Some(1)),
+            reg("3:0", "Tommy", Some(1)),
+            reg("5:0", "second line", Some(4)),
+        ];
+        let mut sel = SelectionState::default();
+        sel.arm("2:0", 0);
+        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (2, 11))));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("Hello Tommy\nsecond line")
+        );
+    }
+
+    /// `<code>` and `<diff>` register their runs without a group, so every
+    /// line stays a line even though one element painted them all.
+    #[test]
+    fn ungrouped_runs_always_separate() {
+        let elements = vec![
+            reg("7:0", "let a = 1;", None),
+            reg("7:1", "let b = 2;", None),
+        ];
+        let mut sel = SelectionState::default();
+        sel.arm("7:0", 0);
+        assert!(sel.promote_pending_for("7:0"));
+        assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (1, 10))));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("let a = 1;\nlet b = 2;")
+        );
     }
 }

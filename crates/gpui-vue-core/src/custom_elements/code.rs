@@ -8,21 +8,29 @@
 //!   code={source}
 //!   language="typescript"       // or path="src/app.ts"
 //!   showLineNumbers
-//!   theme={{ syntax: { keyword: '#f38ba8' } }}
+//!   style={{ padding: 12, borderRadius: 10, backgroundColor: '#141414' }}
 //! />
 //! ```
 //!
-//! The block renders **one div per line** at an exact `CODE_LINE_HEIGHT`, so
-//! its height is `lines × lineHeight + padding + header` before any
-//! highlighting has run. Highlighting is pure paint: every run on a line shares
-//! the same font and differs only in colour, so a late highlight can never
-//! reflow the block.
+//! **It paints no surface of its own**: no fill, no border, no radius, no
+//! padding and no language header. `style` is the surface, so an app owns the
+//! card look and `<code>` owns the glyphs. `<markdown>` keeps its own
+//! fenced-block card, because a document renderer owns its layout.
+//!
+//! Two things stay ours: lines never wrap, and the block is its own horizontal
+//! scroller, so `whiteSpace` and `overflowX` in `style` do nothing.
+//!
+//! The block renders **one div per line** at an exact line height, so its
+//! height is `lines × lineHeight` before any highlighting has run. Highlighting
+//! is pure paint: every run on a line shares the same font and differs only in
+//! colour, so a late highlight can never reflow the block.
 
 use std::sync::Arc;
 
-use gpui::{px, Font, SharedString};
+use gpui::{px, Font, Hsla, SharedString};
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
+use crate::style::StyleDesc;
 use crate::syntax::{cache::highlight_cached, HighlightedDocument};
 use crate::text::runs::runs_for_spans;
 use crate::theme::{Metrics, Theme};
@@ -49,7 +57,6 @@ pub struct CodeElement {
     language: Option<String>,
     path: Option<String>,
     show_line_numbers: bool,
-    show_header: bool,
     theme: Theme,
     /// Cached highlight for the current `(code, language, path)`. The syntax
     /// cache already dedupes parsing, but this avoids hashing the source on
@@ -74,9 +81,67 @@ impl CodeElement {
             highlight_cached(&self.code, self.path.as_deref(), self.language.as_deref());
         self.highlight.clone()
     }
+}
 
-    fn mono(&self) -> Font {
-        gpui::font(self.theme.font_mono.clone())
+/// The typography actually used to paint, with `style` winning over the theme.
+///
+/// One resolver, because the same numbers feed three places: the div text
+/// style, every `TextRun`, and the fixed row height. A `TextRun` that carries a
+/// different font than the div measured with makes glyphs drift, and a row
+/// height that ignores `style.lineHeight` clips the glyphs.
+#[derive(Clone, PartialEq, Debug)]
+struct Typography {
+    family: String,
+    weight: gpui::FontWeight,
+    text_size: f32,
+    line_height: f32,
+    plain: Hsla,
+}
+
+impl Typography {
+    fn font(&self) -> Font {
+        let mut font = gpui::font(self.family.clone());
+        font.weight = self.weight;
+        font
+    }
+}
+
+fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typography {
+    let text_size = style
+        .and_then(|style| style.font_size)
+        .map(|size| size as f32)
+        .filter(|size| *size > 0.0)
+        .unwrap_or(m.code_text_size);
+    Typography {
+        family: style
+            .and_then(|style| style.font_family.clone())
+            .unwrap_or_else(|| theme.font_mono.clone()),
+        weight: style
+            .and_then(|style| style.font_weight.as_ref())
+            .map(crate::renderer::parse_font_weight)
+            .unwrap_or(gpui::FontWeight::NORMAL),
+        text_size,
+        // `fontSize` alone must scale the row too. Rows are a fixed height, so
+        // holding the theme line height while the glyphs grow makes lines
+        // overlap. Keep the theme's ratio unless the caller states a height.
+        // A zero `codeTextSize` metric would divide by zero and hand Taffy an
+        // infinity, which paints nothing at all, so guard the ratio.
+        line_height: style
+            .and_then(|style| style.line_height)
+            .map(|height| height as f32)
+            .filter(|height| *height > 0.0)
+            .unwrap_or_else(|| {
+                if m.code_text_size > 0.0 {
+                    m.code_line_height * text_size / m.code_text_size
+                } else {
+                    m.code_line_height
+                }
+            }),
+        plain: style
+            .and_then(|style| style.color.as_deref())
+            .and_then(crate::color::parse_color_rgba)
+            .map(Hsla::from)
+            .unwrap_or(theme.text),
     }
 }
 
@@ -101,26 +166,23 @@ impl CustomElement for CodeElement {
         let theme = self.theme.clone();
         let m = &theme.metrics;
         let highlight = self.resolve_highlight();
-        let mono = self.mono();
+        let type_style = typography(ctx.style, &theme, m);
+        let font = type_style.font();
         let lines: Vec<&str> = self.code.split('\n').collect();
         let gutter_width = gutter_width(lines.len(), m);
 
-        let mut body = gpui::div()
-            .id(SharedString::from(format!(
-                "__gpui_vue_code_body_{}",
-                ctx.id
-            )))
-            .overflow_x_scroll()
-            .restrict_scroll_to_axis()
-            .min_w_0()
-            .px(px(m.code_padding_x))
-            .py(px(m.code_padding_y))
-            .font_family(theme.font_mono.clone())
-            .text_size(px(m.code_text_size))
-            .line_height(px(m.code_line_height))
-            .whitespace_nowrap()
+        // overflow-x only works as a flex row viewport. A flex_col scroller
+        // stretches nowrap rows to the viewport width, so a horizontal wheel
+        // does nothing. Same pattern as host overflowX.
+        let mut content = gpui::div()
+            .flex_none()
             .flex()
-            .flex_col();
+            .flex_col()
+            .font_family(type_style.family.clone())
+            .font_weight(type_style.weight)
+            .text_size(px(type_style.text_size))
+            .line_height(px(type_style.line_height))
+            .whitespace_nowrap();
 
         for (line_ix, line) in lines.iter().enumerate() {
             let spans: Vec<(std::ops::Range<usize>, gpui::Hsla)> = highlight
@@ -133,10 +195,10 @@ impl CustomElement for CodeElement {
                         .collect()
                 })
                 .unwrap_or_default();
-            let runs = runs_for_spans(line, &spans, &mono, theme.text);
+            let runs = runs_for_spans(line, &spans, &font, type_style.plain);
 
             let mut row = gpui::div()
-                .h(px(m.code_line_height))
+                .h(px(type_style.line_height))
                 .flex_none()
                 .flex()
                 .flex_row();
@@ -159,81 +221,50 @@ impl CustomElement for CodeElement {
             // `sub` is the line index so each line owns a stable selection key
             // across frames. Using the element id alone would make every line
             // share one key and the wash would paint on all of them at once.
-            body = body.child(row.child(ctx.text(line_ix, line.to_string(), Some(runs))));
+            content = content.child(row.child(ctx.text(line_ix, line.to_string(), Some(runs))));
         }
 
-        let mut block = gpui::div()
-            .rounded(px(m.code_radius))
-            .bg(ink(&theme, 0.035))
-            .border_1()
-            .border_color(theme.border)
-            .overflow_hidden()
-            .relative();
+        // The scroller stays a child of the styled surface instead of being the
+        // surface. `wire_standard_events` records the last painted bounds on
+        // the styled node, and gpui applies the scroll offset to a scroller's
+        // own children — merging the two would drift `getElementBounds` (and
+        // every automation click) after a horizontal pan.
+        let body = gpui::div()
+            .id(SharedString::from(format!(
+                "__gpui_vue_code_body_{}",
+                ctx.id
+            )))
+            .flex()
+            .min_w_0()
+            .overflow_x_scroll()
+            .restrict_scroll_to_axis()
+            .child(content);
 
-        if self.show_header {
-            if let Some(language) = self.language.clone() {
-                block = block.child(
-                    gpui::div()
-                        .px(px(m.code_padding_x))
-                        .py(px(m.code_header_padding_y))
-                        .border_b_1()
-                        .border_color(theme.border)
-                        .bg(ink(&theme, 0.02))
-                        .text_size(px(m.code_header_text_size))
-                        .text_color(theme.text_muted)
-                        .child(ctx.chrome_text(language, None)),
-                );
-            }
-        }
-
-        let mut block = block
-            .id(SharedString::from(format!("__gpui_vue_code_{}", ctx.id)))
-            .child(body);
+        let mut block = gpui::div().id(SharedString::from(format!("__gpui_vue_code_{}", ctx.id)));
         if let Some(style) = ctx.style {
             block = crate::renderer::apply_styles(block, style);
         }
+        block = block.child(body);
         block = wire_standard_events(block, &ctx);
         block.into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "code" => self.code = value.as_str().unwrap_or("").to_string(),
+            "code" => self.code = value.as_str().unwrap_or("").replace("\r\n", "\n"),
             "language" => self.language = value.as_str().map(str::to_string),
             "path" => self.path = value.as_str().map(str::to_string),
             "showLineNumbers" => self.show_line_numbers = value.as_bool().unwrap_or(false),
-            // The header defaults ON when a language is set, matching Comet's
-            // markdown code blocks. Pass `showHeader={false}` for a bare block.
-            "showHeader" => self.show_header = value.as_bool().unwrap_or(true),
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
-        &[
-            "code",
-            "language",
-            "path",
-            "showLineNumbers",
-            "showHeader",
-            "theme",
-        ]
+    fn supported_props(&self) -> &'static [&'static str] {
+        &["code", "language", "path", "showLineNumbers", "theme"]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        match key {
-            "code" => Some(serde_json::Value::String(self.code.clone())),
-            "language" => self
-                .language
-                .clone()
-                .map(serde_json::Value::String)
-                .or(Some(serde_json::Value::Null)),
-            _ => None,
-        }
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &["click", "mouseEnter", "mouseLeave"]
     }
 
@@ -250,6 +281,17 @@ pub(crate) fn wire_standard_events(
     ctx: &CustomRenderContext,
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
+
+    // Same last-paint box `div` / `text` record. Without this, `getElementBounds`
+    // and automation locators return null for `<markdown>`, `<code>`, and `<diff>`.
+    if ctx
+        .style
+        .and_then(|style| style.position.as_deref())
+        .is_none()
+    {
+        el = el.relative();
+    }
+    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
 
     let id = ctx.id;
     for event in ctx.events {
@@ -295,13 +337,6 @@ fn gutter_width(line_count: usize, m: &Metrics) -> f32 {
     (digits * m.code_gutter_digit_width + m.code_gutter_padding_right).max(m.code_gutter_min_width)
 }
 
-/// Translucent white on dark, translucent black on light — Comet's `ink`.
-fn ink(theme: &Theme, alpha: f32) -> gpui::Hsla {
-    // `bg` lightness is the appearance tell: near-black in dark, white in light.
-    let lightness = if theme.bg.l < 0.5 { 1.0 } else { 0.0 };
-    gpui::hsla(0.0, 0.0, lightness, alpha)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,9 +356,70 @@ mod tests {
     }
 
     #[test]
-    fn ink_flips_with_appearance() {
-        assert_eq!(ink(&Theme::dark(), 0.1).l, 1.0);
-        assert_eq!(ink(&Theme::light(), 0.1).l, 0.0);
+    fn typography_falls_back_to_the_theme() {
+        let theme = Theme::dark();
+        let resolved = typography(None, &theme, &theme.metrics);
+        assert_eq!(resolved.family, theme.font_mono);
+        assert_eq!(resolved.text_size, theme.metrics.code_text_size);
+        assert_eq!(resolved.line_height, theme.metrics.code_line_height);
+        assert_eq!(resolved.plain, theme.text);
+    }
+
+    #[test]
+    fn typography_prefers_the_style_prop() {
+        let theme = Theme::dark();
+        let style = StyleDesc {
+            font_family: Some("Fira Code".to_string()),
+            font_size: Some(20.0),
+            line_height: Some(30.0),
+            color: Some("#ff0000".to_string()),
+            ..Default::default()
+        };
+        let resolved = typography(Some(&style), &theme, &theme.metrics);
+        assert_eq!(resolved.family, "Fira Code");
+        assert_eq!(resolved.text_size, 20.0);
+        assert_eq!(resolved.line_height, 30.0);
+        assert_eq!(
+            resolved.plain,
+            Hsla::from(crate::color::parse_color_rgba("#ff0000").unwrap())
+        );
+    }
+
+    #[test]
+    fn typography_ignores_a_zero_size_or_line_height() {
+        let theme = Theme::dark();
+        let style = StyleDesc {
+            font_size: Some(0.0),
+            line_height: Some(0.0),
+            ..Default::default()
+        };
+        let resolved = typography(Some(&style), &theme, &theme.metrics);
+        assert_eq!(resolved.text_size, theme.metrics.code_text_size);
+        assert_eq!(resolved.line_height, theme.metrics.code_line_height);
+    }
+
+    #[test]
+    fn a_bare_font_size_scales_the_row_height() {
+        let theme = Theme::dark();
+        let style = StyleDesc {
+            font_size: Some((theme.metrics.code_text_size * 2.0) as f64),
+            ..Default::default()
+        };
+        let resolved = typography(Some(&style), &theme, &theme.metrics);
+        // Doubling the glyphs without doubling the row would overlap the lines.
+        assert_eq!(resolved.line_height, theme.metrics.code_line_height * 2.0);
+    }
+
+    #[test]
+    fn a_zero_text_size_metric_cannot_produce_an_infinite_row() {
+        let mut metrics = Metrics::default();
+        metrics.code_text_size = 0.0;
+        let style = StyleDesc {
+            font_size: Some(20.0),
+            ..Default::default()
+        };
+        let resolved = typography(Some(&style), &Theme::dark(), &metrics);
+        assert_eq!(resolved.line_height, metrics.code_line_height);
     }
 
     #[test]

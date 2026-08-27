@@ -1,0 +1,72 @@
+:root {
+  color-scheme: dark;
+  background: #090d14;
+  color: #edf3ff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+html,
+body,
+canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* GPUI's hidden IME textarea needs a real selection for composition. */
+[data-gpui-input] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+body {
+  display: flex;
+}
+
+canvas {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 100%;
+  touch-action: none;
+}
+
+body[data-example="multiple-windows"] canvas {
+  width: 50% !important;
+  flex-basis: 50%;
+}
+
+#loading {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #090d14;
+  color: #91a0b8;
+  text-align: center;
+  transition: opacity 160ms ease;
+}
+
+#loading.hidden {
+  pointer-events: none;
+  opacity: 0;
+}
+
+#loading.error {
+  color: #ff9aab;
+}

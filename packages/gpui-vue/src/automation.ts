@@ -162,21 +162,42 @@ export class GpuiAutomation {
     throw new Error(`Native bounds are not available for GPUI element ${node.id}`)
   }
 
-  click(target: AutomationTarget, button = 0): void {
+  click(target: AutomationTarget, button = 0, modifiers?: string): void {
     const bounds = this.bounds(target)
-    this.renderer.simulateClick?.(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, button)
+    this.renderer.simulateClick?.(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+      button,
+      modifiers,
+    )
   }
 
-  mouseMove(x: number, y: number, pressedButton?: number): void {
-    this.renderer.simulateMouseMove?.(x, y, pressedButton)
+  mouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void {
+    this.renderer.simulateMouseMove?.(x, y, pressedButton, modifiers)
   }
 
-  mouseDown(x: number, y: number, button = 0): void {
-    this.renderer.simulateMouseDown?.(x, y, button)
+  mouseDown(x: number, y: number, button = 0, modifiers?: string): void {
+    this.renderer.simulateMouseDown?.(x, y, button, modifiers)
   }
 
-  mouseUp(x: number, y: number, button = 0): void {
-    this.renderer.simulateMouseUp?.(x, y, button)
+  mouseUp(x: number, y: number, button = 0, modifiers?: string): void {
+    this.renderer.simulateMouseUp?.(x, y, button, modifiers)
+  }
+
+  wheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string): void {
+    this.renderer.simulateScrollWheel?.(x, y, deltaX, deltaY, modifiers)
+  }
+
+  keystrokes(keys: string): void {
+    this.renderer.simulateKeystrokes?.(keys)
+  }
+
+  keyDown(key: string, isHeld?: boolean): void {
+    this.renderer.simulateKeyDown?.(key, isHeld)
+  }
+
+  keyUp(key: string): void {
+    this.renderer.simulateKeyUp?.(key)
   }
 
   pauseClock(): number {
@@ -243,7 +264,10 @@ export {
 } from "./automation-client.js"
 export type {
   AutomationBackend,
+  DragOptions,
   LiveAutomationRenderer,
+  MouseOptions,
+  PointTarget,
   TestAutomationRenderer,
 } from "./automation-client.js"
 export {

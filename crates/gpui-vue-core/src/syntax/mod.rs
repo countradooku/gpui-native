@@ -1,4 +1,4 @@
-//! Tree-sitter syntax highlighting, reduced to a neutral contract.
+//! Syntect syntax highlighting, reduced to a neutral contract.
 //!
 //! Ported from Comet (https://github.com/zeronsh/comet), MIT.
 //! Original: `crates/syntax/src/lib.rs`.
@@ -7,6 +7,9 @@
 //! [`HighlightKind`], never an `Hsla`. Colour is applied later from the theme,
 //! so switching appearance recolours existing spans instead of reparsing, and a
 //! JS-supplied palette can override every token without touching this module.
+//!
+//! Syntect scope stacks are mapped to [`HighlightKind`] here. Themes stay out
+//! of this module so a palette change never reparses.
 //!
 //! Ranges are byte offsets relative to one UTF-8 source **line**, which is what
 //! per-line rendering needs and what makes a code block's height exact before
@@ -17,8 +20,10 @@ pub mod cache;
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::Path;
+use std::sync::OnceLock;
 
-use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
+use syntect::easy::ScopeRangeIterator;
+use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
 /// Sources larger than this are rendered plain. Highlighting a megabyte of
 /// minified JS blocks the frame for longer than anyone will tolerate.
@@ -40,9 +45,8 @@ impl Default for HighlightLimits {
     }
 }
 
-/// Bundled grammars. Comet ships 28; this is the subset that covers the
-/// languages a GPUI Vue app is likely to display, kept small because every grammar
-/// is a C file compiled into the native binary.
+/// Languages resolved against Syntect's default syntax set. Detection still
+/// uses this closed list so unknown fences stay plain text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LanguageId {
     Rust,
@@ -314,288 +318,298 @@ pub fn highlight_with_limits(
     )
     .ok_or(HighlightError::UnknownLanguage)?;
 
-    let mut primary = configuration(language)?;
-    primary.configure(CAPTURE_NAMES);
-    // Only HTML and Markdown host other languages; building 15 extra grammar
-    // configurations for every Rust snippet would dwarf the parse itself.
-    let injected = if matches!(language, LanguageId::Html | LanguageId::Markdown) {
-        injected_languages(language)
-            .into_iter()
-            .filter_map(|language| {
-                let mut config = configuration(language).ok()?;
-                config.configure(CAPTURE_NAMES);
-                Some((language, config))
-            })
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    let mut highlighter = Highlighter::new();
-    let events = highlighter
-        .highlight(&primary, request.source.as_bytes(), None, |name| {
-            let language = language_for_alias(name)?;
-            injected
-                .iter()
-                .find(|(candidate, _)| *candidate == language)
-                .map(|(_, config)| config)
-        })
-        .map_err(|error| HighlightError::Parser(error.to_string()))?;
-
-    let mut active = Vec::new();
+    let syntax = syntax_for_language(language)?;
+    let set = syntax_set();
+    let mut parse_state = ParseState::new(syntax);
+    let mut stack = ScopeStack::new();
     let mut spans = Vec::new();
-    for event in events {
-        match event.map_err(|error| HighlightError::Parser(error.to_string()))? {
-            HighlightEvent::HighlightStart(highlight) => active.push(CAPTURE_KINDS[highlight.0]),
-            HighlightEvent::HighlightEnd => {
-                active.pop();
-            }
-            HighlightEvent::Source { start, end } => {
-                if let Some(kind) = active.iter().copied().max_by_key(|kind| kind.precedence()) {
-                    spans.push(HighlightSpan {
-                        range: start..end,
-                        kind,
-                    });
-                    if spans.len() > limits.max_spans {
-                        return Err(HighlightError::TooManySpans);
-                    }
+    let mut offset = 0;
+
+    if !request.source.is_empty() {
+        for line in request.source.split_inclusive('\n') {
+            let ops = parse_state
+                .parse_line(line, set)
+                .map_err(|error| HighlightError::Parser(error.to_string()))?;
+            for (range, op) in ScopeRangeIterator::new(&ops, line) {
+                stack
+                    .apply(op)
+                    .map_err(|error| HighlightError::Parser(error.to_string()))?;
+                if range.is_empty() {
+                    continue;
+                }
+                let Some(kind) = kind_for_region(language, &line[range.clone()], &stack) else {
+                    continue;
+                };
+                spans.push(HighlightSpan {
+                    range: offset + range.start..offset + range.end,
+                    kind,
+                });
+                if spans.len() > limits.max_spans {
+                    return Err(HighlightError::TooManySpans);
                 }
             }
+            offset += line.len();
         }
     }
+
     HighlightedDocument::from_absolute_spans(language, request.source, spans)
 }
 
-fn injected_languages(parent: LanguageId) -> Vec<LanguageId> {
-    use LanguageId::*;
-    match parent {
-        Html => vec![JavaScript, Css, Json],
-        Markdown => vec![
-            Rust, JavaScript, Jsx, TypeScript, Tsx, Python, Go, Json, Bash, Toml, Html, Css, Yaml,
-            C,
-        ],
-        _ => Vec::new(),
+fn syntax_set() -> &'static SyntaxSet {
+    static SET: OnceLock<SyntaxSet> = OnceLock::new();
+    // Default syntect dump has no TypeScript, TSX, or TOML. two-face is bat's
+    // extra syntax pack.
+    //
+    // Loading this dump costs ~3ms. The expensive part is that syntect compiles
+    // a grammar's TextMate regexes lazily, on the FIRST highlight of that
+    // language, on the frame thread, inside a paint. With fancy-regex that was
+    // ~133ms for TypeScript and ~17ms for Rust, which read as a slow mount and
+    // as one dropped frame when a scroll first revealed a code block. Cargo.toml
+    // therefore picks regex-onig off wasm (~12ms and ~1.6ms) and keeps
+    // regex-fancy for wasm, where onig_sys cannot compile its C sources because
+    // wasm32-unknown-unknown has no libc. Do not "simplify" that split back into
+    // one dependency, and do not retry onig on wasm.
+    SET.get_or_init(two_face::syntax::extra_newlines)
+}
+
+fn syntax_for_language(language: LanguageId) -> Result<&'static SyntaxReference, HighlightError> {
+    let set = syntax_set();
+    let (names, extensions): (&[&str], &[&str]) = match language {
+        LanguageId::Rust => (&["Rust"], &["rs"]),
+        LanguageId::JavaScript => (&["JavaScript"], &["js"]),
+        // two-face fancy excludes JavaScript (Babel), so JSX uses the TSX grammar.
+        LanguageId::Jsx => (&["TypeScriptReact", "JavaScript"], &["jsx", "tsx"]),
+        LanguageId::TypeScript => (&["TypeScript"], &["ts"]),
+        LanguageId::Tsx => (&["TypeScriptReact"], &["tsx"]),
+        LanguageId::Python => (&["Python"], &["py"]),
+        LanguageId::Go => (&["Go"], &["go"]),
+        LanguageId::Json => (&["JSON"], &["json"]),
+        LanguageId::Jsonc => (&["JSON with Comments", "JSONC", "JSON"], &["jsonc", "json"]),
+        LanguageId::Bash => (&["Bourne Again Shell (bash)", "Bash"], &["bash", "sh"]),
+        LanguageId::Toml => (&["TOML"], &["toml"]),
+        LanguageId::Markdown => (&["Markdown"], &["md"]),
+        LanguageId::Html => (&["HTML"], &["html"]),
+        LanguageId::Css => (&["CSS"], &["css"]),
+        LanguageId::Yaml => (&["YAML"], &["yaml", "yml"]),
+        LanguageId::C => (&["C"], &["c"]),
+    };
+    names
+        .iter()
+        .find_map(|name| set.find_syntax_by_name(name))
+        .or_else(|| {
+            extensions
+                .iter()
+                .find_map(|ext| set.find_syntax_by_extension(ext))
+        })
+        .ok_or_else(|| HighlightError::Parser(format!("no syntect grammar for {language:?}")))
+}
+
+fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
+    let mut best = None;
+    for scope in stack.as_slice() {
+        let Some(kind) = kind_for_scope_name(&scope.build_string()) else {
+            continue;
+        };
+        if best.is_none_or(|prev: HighlightKind| kind.precedence() >= prev.precedence()) {
+            best = Some(kind);
+        }
     }
+    best
 }
 
-fn make_configuration(
-    language: tree_sitter::Language,
-    name: &str,
-    highlights: &str,
-    injections: &str,
-    locals: &str,
-) -> Result<HighlightConfiguration, HighlightError> {
-    HighlightConfiguration::new(language, name, highlights, injections, locals)
-        .map_err(|error| HighlightError::Parser(error.to_string()))
+fn stack_has_prefix(stack: &ScopeStack, prefix: &str) -> bool {
+    stack
+        .as_slice()
+        .iter()
+        .any(|scope| scope_matches(&scope.build_string(), prefix))
 }
 
-fn rust_configuration() -> Result<HighlightConfiguration, HighlightError> {
-    // The upstream Rust query groups numbers and booleans under
-    // `constant.builtin`. Splitting them keeps a number amber and a bool its
-    // own colour, matching every other language in the palette.
-    let highlights = tree_sitter_rust::HIGHLIGHTS_QUERY
-        .replace(
-            "(boolean_literal) @constant.builtin",
-            "(boolean_literal) @boolean",
-        )
-        .replace(
-            "(integer_literal) @constant.builtin",
-            "(integer_literal) @number",
-        )
-        .replace(
-            "(float_literal) @constant.builtin",
-            "(float_literal) @number",
-        );
-    make_configuration(
-        tree_sitter_rust::LANGUAGE.into(),
-        "rust",
-        &highlights,
-        tree_sitter_rust::INJECTIONS_QUERY,
-        "",
+fn is_boolean_literal(text: &str) -> bool {
+    matches!(
+        text.trim(),
+        "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "yes" | "no" | "on" | "off"
     )
 }
 
-fn configuration(language: LanguageId) -> Result<HighlightConfiguration, HighlightError> {
-    use LanguageId::*;
+fn is_builtin_type(language: LanguageId, text: &str) -> bool {
+    let text = text.trim();
     match language {
-        Rust => rust_configuration(),
-        JavaScript => make_configuration(
-            tree_sitter_javascript::LANGUAGE.into(),
-            "javascript",
-            tree_sitter_javascript::HIGHLIGHT_QUERY,
-            tree_sitter_javascript::INJECTIONS_QUERY,
-            tree_sitter_javascript::LOCALS_QUERY,
+        LanguageId::C => matches!(
+            text,
+            "int"
+                | "void"
+                | "char"
+                | "unsigned"
+                | "signed"
+                | "long"
+                | "short"
+                | "float"
+                | "double"
+                | "_Bool"
+                | "bool"
+                | "size_t"
+                | "ssize_t"
+                | "int8_t"
+                | "int16_t"
+                | "int32_t"
+                | "int64_t"
+                | "uint8_t"
+                | "uint16_t"
+                | "uint32_t"
+                | "uint64_t"
+                | "uintptr_t"
+                | "intptr_t"
+                | "ptrdiff_t"
         ),
-        Jsx => make_configuration(
-            tree_sitter_javascript::LANGUAGE.into(),
-            "jsx",
-            &format!(
-                "{}\n{}",
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-                tree_sitter_javascript::JSX_HIGHLIGHT_QUERY
-            ),
-            tree_sitter_javascript::INJECTIONS_QUERY,
-            tree_sitter_javascript::LOCALS_QUERY,
+        LanguageId::Rust => matches!(
+            text,
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "isize"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "usize"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "char"
+                | "str"
+                | "Self"
         ),
-        // `tree_sitter_typescript::HIGHLIGHTS_QUERY` holds only the
-        // TypeScript-specific captures — types, interfaces, enums. On its own it
-        // colours a type annotation and leaves every keyword and string plain.
-        // The JavaScript query has to be prepended. Comet ships the TS query
-        // alone and its TypeScript blocks are correspondingly bare.
-        TypeScript => make_configuration(
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            "typescript",
-            &format!(
-                "{}\n{}",
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-                tree_sitter_typescript::HIGHLIGHTS_QUERY
-            ),
-            "",
-            tree_sitter_typescript::LOCALS_QUERY,
-        ),
-        Tsx => make_configuration(
-            tree_sitter_typescript::LANGUAGE_TSX.into(),
-            "tsx",
-            &format!(
-                "{}\n{}\n{}",
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-                tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
-                tree_sitter_typescript::HIGHLIGHTS_QUERY
-            ),
-            "",
-            tree_sitter_typescript::LOCALS_QUERY,
-        ),
-        Python => make_configuration(
-            tree_sitter_python::LANGUAGE.into(),
-            "python",
-            tree_sitter_python::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Go => make_configuration(
-            tree_sitter_go::LANGUAGE.into(),
-            "go",
-            tree_sitter_go::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Json | Jsonc => make_configuration(
-            tree_sitter_json::LANGUAGE.into(),
-            "json",
-            tree_sitter_json::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Bash => make_configuration(
-            tree_sitter_bash::LANGUAGE.into(),
-            "bash",
-            tree_sitter_bash::HIGHLIGHT_QUERY,
-            "",
-            "",
-        ),
-        Toml => make_configuration(
-            tree_sitter_toml_ng::LANGUAGE.into(),
-            "toml",
-            tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Markdown => make_configuration(
-            tree_sitter_md::LANGUAGE.into(),
-            "markdown",
-            tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
-            tree_sitter_md::INJECTION_QUERY_BLOCK,
-            "",
-        ),
-        Html => make_configuration(
-            tree_sitter_html::LANGUAGE.into(),
-            "html",
-            tree_sitter_html::HIGHLIGHTS_QUERY,
-            tree_sitter_html::INJECTIONS_QUERY,
-            "",
-        ),
-        Css => make_configuration(
-            tree_sitter_css::LANGUAGE.into(),
-            "css",
-            tree_sitter_css::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Yaml => make_configuration(
-            tree_sitter_yaml::LANGUAGE.into(),
-            "yaml",
-            tree_sitter_yaml::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        C => make_configuration(
-            tree_sitter_c::LANGUAGE.into(),
-            "c",
-            tree_sitter_c::HIGHLIGHT_QUERY,
-            "",
-            "",
-        ),
+        LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Jsx => {
+            matches!(
+                text,
+                "string"
+                    | "number"
+                    | "boolean"
+                    | "bigint"
+                    | "symbol"
+                    | "object"
+                    | "undefined"
+                    | "never"
+                    | "unknown"
+                    | "any"
+                    | "void"
+            )
+        }
+        _ => false,
     }
 }
 
-/// Ordered generic to specific. `HighlightConfiguration::configure` resolves a
-/// dotted capture such as `function.method` to the best entry in this table, so
-/// the order is load-bearing: `function` must precede `function.builtin`.
-const CAPTURE_NAMES: &[&str] = &[
-    "comment",
-    "keyword",
-    "string",
-    "string.special",
-    "string.escape",
-    "number",
-    "boolean",
-    "type",
-    "type.builtin",
-    "constructor",
-    "function",
-    "function.builtin",
-    "function.macro",
-    "property",
-    "constant",
-    "variable",
-    "variable.builtin",
-    "variable.parameter",
-    "operator",
-    "punctuation",
-    "tag",
-    "attribute",
-    "label",
-    "embedded",
-    "error",
+fn kind_for_region(language: LanguageId, text: &str, stack: &ScopeStack) -> Option<HighlightKind> {
+    let kind = kind_for_stack(stack)?;
+    if stack_has_prefix(stack, "constant.language") {
+        return Some(if is_boolean_literal(text) {
+            HighlightKind::Boolean
+        } else {
+            HighlightKind::Constant
+        });
+    }
+    if stack_has_prefix(stack, "storage.type") {
+        return Some(if is_builtin_type(language, text) {
+            match language {
+                LanguageId::C => HighlightKind::Type,
+                _ => HighlightKind::TypeBuiltin,
+            }
+        } else {
+            HighlightKind::Keyword
+        });
+    }
+    Some(kind)
+}
+
+/// Longest prefix first. `string` must not steal `string.regexp`.
+const SCOPE_PREFIXES: &[(&str, HighlightKind)] = &[
+    ("entity.other.attribute-name", HighlightKind::Attribute),
+    ("support.type.property-name", HighlightKind::Property),
+    ("constant.language.undefined", HighlightKind::Constant),
+    ("entity.name.function.macro", HighlightKind::Macro),
+    ("constant.character.escape", HighlightKind::Escape),
+    ("constant.language.boolean", HighlightKind::Boolean),
+    ("entity.name.constructor", HighlightKind::Constructor),
+    ("meta.object-literal.key", HighlightKind::Property),
+    ("support.function.builtin", HighlightKind::FunctionBuiltin),
+    ("support.function.macro", HighlightKind::Macro),
+    ("variable.other.property", HighlightKind::Property),
+    ("variable.other.constant", HighlightKind::Constant),
+    ("constant.language.none", HighlightKind::Constant),
+    ("constant.language.null", HighlightKind::Constant),
+    ("support.class.builtin", HighlightKind::TypeBuiltin),
+    ("entity.name.interface", HighlightKind::Type),
+    ("entity.name.namespace", HighlightKind::Type),
+    ("entity.name.function", HighlightKind::Function),
+    ("variable.other.member", HighlightKind::Property),
+    ("constant.language.nil", HighlightKind::Constant),
+    ("string.interpolated", HighlightKind::StringSpecial),
+    ("constant.character", HighlightKind::Escape),
+    ("entity.name.section", HighlightKind::Label),
+    ("variable.parameter", HighlightKind::Parameter),
+    ("constant.language", HighlightKind::Boolean),
+    ("entity.name.struct", HighlightKind::Type),
+    ("variable.language", HighlightKind::VariableSpecial),
+    ("constant.numeric", HighlightKind::Number),
+    ("entity.name.class", HighlightKind::Type),
+    ("entity.name.label", HighlightKind::Label),
+    ("entity.name.macro", HighlightKind::Macro),
+    ("entity.name.trait", HighlightKind::Type),
+    ("keyword.operator", HighlightKind::Operator),
+    ("meta.mapping.key", HighlightKind::Property),
+    ("storage.modifier", HighlightKind::Keyword),
+    ("string.quoted.other", HighlightKind::StringSpecial),
+    ("support.constant", HighlightKind::Constant),
+    ("support.function", HighlightKind::FunctionBuiltin),
+    ("constant.other", HighlightKind::Constant),
+    ("entity.name.enum", HighlightKind::Type),
+    ("entity.name.tag", HighlightKind::Tag),
+    ("entity.name.type", HighlightKind::Type),
+    ("keyword.control", HighlightKind::Keyword),
+    ("string.unquoted", HighlightKind::StringSpecial),
+    ("meta.embedded", HighlightKind::Embedded),
+    ("string.escape", HighlightKind::Escape),
+    ("string.regexp", HighlightKind::StringSpecial),
+    ("support.class", HighlightKind::TypeBuiltin),
+    ("support.macro", HighlightKind::Macro),
+    ("storage.type", HighlightKind::Keyword),
+    ("support.type", HighlightKind::TypeBuiltin),
+    ("punctuation", HighlightKind::Punctuation),
+    ("constructor", HighlightKind::Constructor),
+    ("variable", HighlightKind::Variable),
+    ("function", HighlightKind::Function),
+    ("operator", HighlightKind::Operator),
+    ("property", HighlightKind::Property),
+    ("constant", HighlightKind::Constant),
+    ("keyword", HighlightKind::Keyword),
+    ("storage", HighlightKind::Keyword),
+    ("boolean", HighlightKind::Boolean),
+    ("comment", HighlightKind::Comment),
+    ("invalid", HighlightKind::Invalid),
+    ("string", HighlightKind::String),
+    ("markup", HighlightKind::Embedded),
+    ("number", HighlightKind::Number),
+    ("label", HighlightKind::Label),
+    ("type", HighlightKind::Type),
 ];
 
-const CAPTURE_KINDS: &[HighlightKind] = &[
-    HighlightKind::Comment,
-    HighlightKind::Keyword,
-    HighlightKind::String,
-    HighlightKind::StringSpecial,
-    HighlightKind::Escape,
-    HighlightKind::Number,
-    HighlightKind::Boolean,
-    HighlightKind::Type,
-    HighlightKind::TypeBuiltin,
-    HighlightKind::Constructor,
-    HighlightKind::Function,
-    HighlightKind::FunctionBuiltin,
-    HighlightKind::Macro,
-    HighlightKind::Property,
-    HighlightKind::Constant,
-    HighlightKind::Variable,
-    HighlightKind::VariableSpecial,
-    HighlightKind::Parameter,
-    HighlightKind::Operator,
-    HighlightKind::Punctuation,
-    HighlightKind::Tag,
-    HighlightKind::Attribute,
-    HighlightKind::Label,
-    HighlightKind::Embedded,
-    HighlightKind::Invalid,
-];
+fn scope_matches(name: &str, prefix: &str) -> bool {
+    name == prefix
+        || (name.len() > prefix.len()
+            && name.starts_with(prefix)
+            && name.as_bytes()[prefix.len()] == b'.')
+}
+
+/// Map a TextMate scope name onto the nearest [`HighlightKind`].
+/// Language prefixes such as `source.rust` are ignored.
+pub fn kind_for_scope_name(name: &str) -> Option<HighlightKind> {
+    SCOPE_PREFIXES
+        .iter()
+        .find(|(prefix, _)| scope_matches(name, prefix))
+        .map(|(_, kind)| *kind)
+}
 
 /// Fence tag beats path, path beats shebang.
 pub fn detect_language(
@@ -737,6 +751,54 @@ mod tests {
     }
 
     #[test]
+    fn language_constants_split_booleans_from_other_literals() {
+        assert_eq!(
+            kind_of("true null", "json", "true"),
+            Some(HighlightKind::Boolean)
+        );
+        assert_eq!(
+            kind_of("true null", "json", "null"),
+            Some(HighlightKind::Constant)
+        );
+        assert_eq!(
+            kind_of("True None", "python", "True"),
+            Some(HighlightKind::Boolean)
+        );
+        assert_eq!(
+            kind_of("True None", "python", "None"),
+            Some(HighlightKind::Constant)
+        );
+        assert_eq!(
+            kind_of("true NaN Infinity", "js", "true"),
+            Some(HighlightKind::Boolean)
+        );
+        assert_eq!(
+            kind_of("true NaN Infinity", "js", "NaN"),
+            Some(HighlightKind::Constant)
+        );
+        assert_eq!(
+            kind_of("true NaN Infinity", "js", "Infinity"),
+            Some(HighlightKind::Constant)
+        );
+    }
+
+    #[test]
+    fn storage_type_keeps_keywords_and_builtin_types_apart() {
+        assert_eq!(
+            kind_of("let x: u32 = 1;", "rust", "let"),
+            Some(HighlightKind::Keyword)
+        );
+        assert_eq!(
+            kind_of("let x: u32 = 1;", "rust", "u32"),
+            Some(HighlightKind::TypeBuiltin)
+        );
+        assert_eq!(
+            kind_of("int main() { return 0; }", "c", "int"),
+            Some(HighlightKind::Type)
+        );
+    }
+
+    #[test]
     fn rust_numbers_and_booleans_are_their_own_kinds() {
         let document = highlight(HighlightRequest {
             source: "let a = 42; let b = true;",
@@ -812,5 +874,225 @@ mod tests {
         .unwrap();
         assert_eq!(document.lines.len(), 1);
         assert!(document.lines[0].is_empty());
+    }
+
+    #[test]
+    fn scope_names_map_to_neutral_kinds() {
+        let cases = [
+            ("comment.line.double-slash.rust", HighlightKind::Comment),
+            ("keyword.control.rust", HighlightKind::Keyword),
+            ("storage.type.rust", HighlightKind::Keyword),
+            ("storage.modifier.rust", HighlightKind::Keyword),
+            ("string.quoted.double.rust", HighlightKind::String),
+            ("string.regexp.js", HighlightKind::StringSpecial),
+            ("constant.character.escape.rust", HighlightKind::Escape),
+            (
+                "constant.numeric.integer.decimal.rust",
+                HighlightKind::Number,
+            ),
+            ("constant.language.boolean.rust", HighlightKind::Boolean),
+            ("constant.language.rust", HighlightKind::Boolean),
+            ("entity.name.type.rust", HighlightKind::Type),
+            ("support.type.python", HighlightKind::TypeBuiltin),
+            ("support.class.builtin.python", HighlightKind::TypeBuiltin),
+            ("entity.name.function.rust", HighlightKind::Function),
+            (
+                "support.function.builtin.python",
+                HighlightKind::FunctionBuiltin,
+            ),
+            ("entity.name.macro.rust", HighlightKind::Macro),
+            ("meta.mapping.key.json", HighlightKind::Property),
+            ("variable.other.member.rust", HighlightKind::Property),
+            ("variable.other.constant.rust", HighlightKind::Constant),
+            ("variable.language.rust", HighlightKind::VariableSpecial),
+            ("variable.parameter.rust", HighlightKind::Parameter),
+            ("variable.other.rust", HighlightKind::Variable),
+            ("keyword.operator.rust", HighlightKind::Operator),
+            (
+                "punctuation.definition.string.rust",
+                HighlightKind::Punctuation,
+            ),
+            ("entity.name.tag.html", HighlightKind::Tag),
+            ("entity.other.attribute-name.html", HighlightKind::Attribute),
+            ("entity.name.label.rust", HighlightKind::Label),
+            ("meta.embedded.block.html", HighlightKind::Embedded),
+            ("invalid.illegal.rust", HighlightKind::Invalid),
+        ];
+        for (scope, expected) in cases {
+            assert_eq!(kind_for_scope_name(scope), Some(expected), "{scope}");
+        }
+        assert_eq!(kind_for_scope_name("source.rust"), None);
+        assert_eq!(kind_for_scope_name("text.html.basic"), None);
+    }
+
+    #[test]
+    fn scope_prefixes_list_more_specific_first() {
+        for (index, (specific, _)) in SCOPE_PREFIXES.iter().enumerate() {
+            for (general, _) in &SCOPE_PREFIXES[index + 1..] {
+                assert!(
+                    !scope_matches(general, specific),
+                    "{specific} is a prefix of later {general}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn more_specific_scopes_win_over_generic_prefixes() {
+        assert_eq!(
+            kind_for_scope_name("constant.numeric.float.rust"),
+            Some(HighlightKind::Number)
+        );
+        assert_eq!(
+            kind_for_scope_name("constant.other.rust"),
+            Some(HighlightKind::Constant)
+        );
+        assert_eq!(
+            kind_for_scope_name("string.unquoted.yaml"),
+            Some(HighlightKind::StringSpecial)
+        );
+    }
+
+    fn first_line_kinds(source: &str, fence_tag: &str) -> Vec<HighlightKind> {
+        let document = highlight(HighlightRequest {
+            source,
+            path: None,
+            fence_tag: Some(fence_tag),
+        })
+        .unwrap();
+        document.lines[0].iter().map(|span| span.kind).collect()
+    }
+
+    fn kind_of(source: &str, fence_tag: &str, token: &str) -> Option<HighlightKind> {
+        let document = highlight(HighlightRequest {
+            source,
+            path: None,
+            fence_tag: Some(fence_tag),
+        })
+        .unwrap();
+        source
+            .split('\n')
+            .zip(document.lines.iter())
+            .find_map(|(line, spans)| {
+                spans.iter().find_map(|span| {
+                    (line.get(span.range.clone()) == Some(token)).then_some(span.kind)
+                })
+            })
+    }
+
+    #[test]
+    fn rust_function_names_are_functions() {
+        let kinds = first_line_kinds("fn greet() {}", "rust");
+        assert!(kinds.contains(&HighlightKind::Function), "{kinds:?}");
+        assert!(kinds.contains(&HighlightKind::Keyword), "{kinds:?}");
+    }
+
+    #[test]
+    fn html_highlights_tags_and_attributes() {
+        let kinds = first_line_kinds("<div class=\"box\">", "html");
+        assert!(kinds.contains(&HighlightKind::Tag), "{kinds:?}");
+        assert!(kinds.contains(&HighlightKind::Attribute), "{kinds:?}");
+        assert!(kinds.contains(&HighlightKind::String), "{kinds:?}");
+    }
+
+    #[test]
+    fn jsx_highlights_tags() {
+        let kinds = first_line_kinds("const el = <Button label=\"ok\" />;", "jsx");
+        assert!(kinds.contains(&HighlightKind::Keyword), "{kinds:?}");
+        assert!(kinds.contains(&HighlightKind::Attribute), "{kinds:?}");
+        assert!(kinds.contains(&HighlightKind::String), "{kinds:?}");
+    }
+
+    #[test]
+    fn python_comments_and_strings() {
+        let kinds = first_line_kinds("# hi\nx = \"ok\"", "python");
+        assert!(kinds.contains(&HighlightKind::Comment), "{kinds:?}");
+        let document = highlight(HighlightRequest {
+            source: "# hi\nx = \"ok\"",
+            path: None,
+            fence_tag: Some("python"),
+        })
+        .unwrap();
+        let line1: Vec<_> = document.lines[1].iter().map(|span| span.kind).collect();
+        assert!(line1.contains(&HighlightKind::String), "{line1:?}");
+    }
+
+    #[test]
+    fn json_keys_and_numbers_are_highlighted() {
+        let kinds = first_line_kinds("{\"name\": 1}", "json");
+        assert!(
+            kinds.contains(&HighlightKind::Property) || kinds.contains(&HighlightKind::String),
+            "{kinds:?}"
+        );
+        assert!(kinds.contains(&HighlightKind::Number), "{kinds:?}");
+    }
+
+    #[test]
+    fn css_properties_are_highlighted() {
+        let kinds = first_line_kinds("body { color: red; }", "css");
+        assert!(kinds.contains(&HighlightKind::Property), "{kinds:?}");
+    }
+
+    #[test]
+    fn markdown_fence_tag_highlights_the_fenced_language() {
+        let document = highlight(HighlightRequest {
+            source: "fn main() {}",
+            path: None,
+            fence_tag: Some("rust"),
+        })
+        .unwrap();
+        assert_eq!(document.language, LanguageId::Rust);
+        let kinds: Vec<_> = document.lines[0].iter().map(|span| span.kind).collect();
+        assert!(kinds.contains(&HighlightKind::Keyword), "{kinds:?}");
+    }
+
+    #[test]
+    fn every_registered_language_highlights() {
+        let samples = [
+            ("rust", "fn main() { let x = 1; }"),
+            ("js", "const x = 'hi';"),
+            ("jsx", "const el = <div />;"),
+            ("ts", "const x: string = 'hi';"),
+            ("tsx", "const el = <div />;"),
+            ("python", "def f():\n    return True"),
+            ("go", "func main() { x := 1 }"),
+            ("json", "{\"a\": 1}"),
+            ("jsonc", "{\"a\": 1}"),
+            ("bash", "echo hi"),
+            ("toml", "name = \"x\""),
+            ("markdown", "# Title"),
+            ("html", "<p>hi</p>"),
+            ("css", "a { color: red; }"),
+            ("yaml", "name: x"),
+            ("c", "int main() { return 0; }"),
+        ];
+        for (tag, source) in samples {
+            let document = highlight(HighlightRequest {
+                source,
+                path: None,
+                fence_tag: Some(tag),
+            })
+            .expect(tag);
+            assert!(
+                !document.lines.is_empty(),
+                "{tag} must produce at least one line"
+            );
+        }
+    }
+
+    #[test]
+    fn too_many_spans_are_rejected() {
+        let result = highlight_with_limits(
+            HighlightRequest {
+                source: "let a = 1; let b = 2; let c = 3;",
+                path: Some("a.rs"),
+                fence_tag: None,
+            },
+            HighlightLimits {
+                max_source_bytes: 10_000,
+                max_spans: 1,
+            },
+        );
+        assert_eq!(result, Err(HighlightError::TooManySpans));
     }
 }

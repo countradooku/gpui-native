@@ -19,14 +19,15 @@
     "build": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build",
     "build:binaries": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build:binary",
     "build:native": "bun --filter @gpui-vue/native build",
+    "build:pages": "bun run scripts/build-pages.mts",
     "check": "bun run typecheck && bun run lint && bun run format:check && cargo check --workspace --all-features",
-    "format": "oxfmt --write packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples scripts .github README.md package.json vite.examples.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
-    "format:check": "oxfmt --check packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples scripts .github README.md package.json vite.examples.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
-    "lint": "oxlint --vue-plugin --deny-warnings packages/gpui-vue/src packages/gpui-vue/test examples scripts vite.examples.config.mts",
-    "lint:fix": "oxlint --vue-plugin --fix packages/gpui-vue/src packages/gpui-vue/test examples scripts vite.examples.config.mts",
+    "format": "oxfmt --write packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples web scripts .github AGENTS.md README.md package.json vite.examples.config.mts vite.pages.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
+    "format:check": "oxfmt --check packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples web scripts .github AGENTS.md README.md package.json vite.examples.config.mts vite.pages.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
+    "lint": "oxlint --vue-plugin --deny-warnings packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
+    "lint:fix": "oxlint --vue-plugin --fix packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
     "test": "bun --filter gpui-vue test && cargo test --workspace",
     "test:native": "bun run scripts/native-smoke.mts",
-    "typecheck": "bun --filter gpui-vue typecheck && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' typecheck"
+    "typecheck": "bun --filter gpui-vue typecheck && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' typecheck && bun packages/gpui-vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.3",

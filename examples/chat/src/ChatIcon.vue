@@ -1,0 +1,26 @@
+<script setup lang="ts">
+import { GpuiSvg, type StyleDesc } from "gpui-vue"
+import { computed } from "vue"
+
+import { icons, type IconName } from "./icons.js"
+
+const props = withDefaults(
+  defineProps<{
+    name: IconName
+    size?: number
+    color: string
+  }>(),
+  { size: 14 },
+)
+
+const style = computed<StyleDesc>(() => ({
+  width: props.size,
+  height: props.size,
+  flexShrink: 0,
+  color: props.color,
+}))
+</script>
+
+<template>
+  <GpuiSvg :source="icons[name]" :style="style" />
+</template>

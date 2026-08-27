@@ -8,7 +8,7 @@
 //! run list per paragraph to hand to `gpui::StyledText`, not a nested AST.
 //!
 //! No incremental parsing here. Comet needs it because it streams LLM output
-//! token by token; GPUI Vue renders whatever Vue hands it, and a full reparse of
+//! token by token; gpui-vue renders whatever Vue hands it, and a full reparse of
 //! a document is cheap next to laying it out.
 
 use std::ops::Range;
@@ -565,12 +565,12 @@ mod tests {
 
     #[test]
     fn autolinks_bare_urls() {
-        let tree = parse("go to https://github.com/remorses/gpui_vue now");
+        let tree = parse("go to https://github.com/remorses/gpuix now");
         let Block::Paragraph { runs } = &tree.blocks[0] else {
             panic!("expected a paragraph");
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
-        assert_eq!(link.text, "https://github.com/remorses/gpui_vue");
+        assert_eq!(link.text, "https://github.com/remorses/gpuix");
     }
 
     #[test]

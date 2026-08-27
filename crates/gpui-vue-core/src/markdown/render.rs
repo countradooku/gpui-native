@@ -164,6 +164,9 @@ pub struct MdContext {
     pub selectable: bool,
     pub selection_wash: Hsla,
     pub theme: Theme,
+    /// Inherited `highlight`, matched per painted string. See
+    /// [`crate::text::search::washes_for_native_run`].
+    pub highlight_set: Option<Arc<crate::text::HighlightContext>>,
     /// Monotonic sub-key counter. Must advance in document order so a drag
     /// resolves spans the same way the reader sees them.
     next_sub: usize,
@@ -180,6 +183,7 @@ impl MdContext {
         selection_wash: Hsla,
         theme: Theme,
         on_link: Option<Arc<dyn Fn(&str)>>,
+        highlight_set: Option<Arc<crate::text::HighlightContext>>,
     ) -> Self {
         Self {
             element_id,
@@ -187,6 +191,7 @@ impl MdContext {
             selectable,
             selection_wash,
             theme,
+            highlight_set,
             next_sub: 0,
             on_link,
         }
@@ -342,6 +347,8 @@ fn text_element(
     let flat = flatten_runs(runs, &ctx.theme, weight);
     let inner = flat_text_element(&flat, ctx);
     div()
+        .w_full()
+        .min_w_0()
         .text_size(px(size))
         .line_height(px(line_height))
         .child(inner)
@@ -382,10 +389,15 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
         links: flat.links.clone(),
         on_link: ctx.on_link.clone(),
         selectable: ctx.selectable,
+        highlight: ctx
+            .highlight_set
+            .clone()
+            .map(crate::text::HighlightSource::Native),
         ..crate::text::SelectableText::new(
+            ctx.element_id,
+            sub,
             flat.text.clone(),
             Some(flat.runs.clone()),
-            crate::text::selection_key(ctx.element_id, sub),
             ctx.selection.clone(),
             ctx.selection_wash,
         )
@@ -400,15 +412,20 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     let mono = font(theme.font_mono.clone());
     let highlight = highlight_cached(code, None, language);
 
-    let mut body = div()
-        .px(px(m.code_padding_x))
-        .py(px(m.code_padding_y))
+    // overflow-x only works as a flex *row* viewport. A flex_col scroller
+    // stretches each nowrap row to the card width, so the line never overflows
+    // and a horizontal wheel does nothing. Same pattern as host overflowX.
+    let scroll_sub = ctx.take_sub();
+    let mut lines = div()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .px(px(m.md_code_padding_x))
+        .py(px(m.md_code_padding_y))
         .font_family(theme.font_mono.clone())
         .text_size(px(m.code_text_size))
         .line_height(px(m.code_line_height))
-        .whitespace_nowrap()
-        .flex()
-        .flex_col();
+        .whitespace_nowrap();
 
     for (line_ix, line) in code.split('\n').enumerate() {
         let spans: Vec<(Range<usize>, Hsla)> = highlight
@@ -423,22 +440,41 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
             .unwrap_or_default();
         let runs = runs_for_spans(line, &spans, &mono, theme.text);
         let sub = ctx.take_sub();
-        let text: AnyElement = if ctx.selectable {
-            crate::text::selectable_text(crate::text::SelectableText::new(
+        // Content, not chrome: `userSelect: "none"` stops the drag, not the
+        // find, and `chrome_text` cannot paint a highlight wash.
+        let text: AnyElement = crate::text::selectable_text(crate::text::SelectableText {
+            selectable: ctx.selectable,
+            highlight: ctx
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
+            ..crate::text::SelectableText::new(
+                ctx.element_id,
+                sub,
                 SharedString::from(line.to_string()),
                 Some(runs),
-                crate::text::selection_key(ctx.element_id, sub),
                 ctx.selection.clone(),
                 ctx.selection_wash,
-            ))
-        } else {
-            crate::text::chrome_text(SharedString::from(line.to_string()), Some(runs))
-        };
-        body = body.child(div().h(px(m.code_line_height)).flex_none().child(text));
+            )
+        });
+        lines = lines.child(div().h(px(m.code_line_height)).flex_none().child(text));
     }
 
+    let body = div()
+        .id(SharedString::from(format!(
+            "__gpui_vue_md_code_{}_{scroll_sub}",
+            ctx.element_id
+        )))
+        .flex()
+        .min_w_0()
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .child(lines);
+
     let mut block = div()
-        .rounded(px(m.code_radius))
+        .w_full()
+        .min_w_0()
+        .rounded(px(m.md_code_radius))
         .bg(ink(&theme, 0.035))
         .border_1()
         .border_color(theme.border)
@@ -447,12 +483,12 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     if let Some(language) = language {
         block = block.child(
             div()
-                .px(px(m.code_padding_x))
-                .py(px(m.code_header_padding_y))
+                .px(px(m.md_code_padding_x))
+                .py(px(m.md_code_header_padding_y))
                 .border_b_1()
                 .border_color(theme.border)
                 .bg(ink(&theme, 0.02))
-                .text_size(px(m.code_header_text_size))
+                .text_size(px(m.md_code_header_text_size))
                 .text_color(theme.text_muted)
                 .child(crate::text::chrome_text(
                     SharedString::from(language.to_string()),

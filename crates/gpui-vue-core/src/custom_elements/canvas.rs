@@ -213,7 +213,7 @@ impl CustomElement for CanvasElement {
                 "__gpui_vue_canvas_{element_id}"
             )))
             .relative()
-            .child(crate::automation::bounds_tracker(element_id))
+            .child(crate::automation::bounds_tracker(element_id, None))
             .child(drawing)
             .children(ctx.children);
         if let Some(style) = ctx.style {
@@ -370,15 +370,11 @@ impl CustomElement for CanvasElement {
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
+    fn supported_props(&self) -> &'static [&'static str] {
         &["commands"]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        (key == "commands").then(|| self.source.clone())
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &[
             "click",
             "mouseDown",

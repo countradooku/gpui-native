@@ -5,11 +5,20 @@
 /// event types. Fields are optional — each event type populates only the
 /// fields it needs. This avoids N different napi structs while keeping the
 /// FFI surface small.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
 
 /// Event payload sent back to JS when a user interacts with an element.
 #[derive(Debug, Clone)]
-#[napi(object)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    derive(serde::Serialize)
+)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    serde(rename_all = "camelCase")
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct EventPayload {
     /// Numeric element ID (matches the ID assigned in JS via createElement).
     pub element_id: f64,
@@ -91,6 +100,18 @@ pub struct EventPayload {
     /// Line number on the post-change side. Populated for: `<diff>` lineClick.
     pub new_line: Option<f64>,
 
+    /// First visible logical index. Populated for: `<virtual-list>` visibleRange.
+    pub start_index: Option<f64>,
+
+    /// Exclusive end of the visible logical range. Populated for: visibleRange.
+    pub end_index: Option<f64>,
+
+    /// Matches found by this element's `highlight` prop. Counted once per match
+    /// even when it is split across several painted runs, and it counts every
+    /// retained match, not only the ones currently on screen.
+    /// Populated for: highlight.
+    pub match_count: Option<f64>,
+
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
 }
@@ -117,13 +138,20 @@ impl Default for EventPayload {
             value: None,
             old_line: None,
             new_line: None,
+            start_index: None,
+            end_index: None,
+            match_count: None,
             modifiers: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-#[napi(object)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    derive(serde::Serialize)
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct EventModifiers {
     pub shift: bool,
     pub ctrl: bool,
@@ -138,6 +166,71 @@ impl Default for EventModifiers {
             ctrl: false,
             alt: false,
             cmd: false,
+        }
+    }
+}
+
+/// One highlight wash painted in the last frame, with the boxes it drew.
+///
+/// The rects matter: a quad never lands in `getPaintedText()`, and a match that
+/// soft-wraps must produce one box per visual row. Without the geometry the only
+/// way to assert either is a screenshot.
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    derive(serde::Serialize)
+)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    serde(rename_all = "camelCase")
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct HighlightMatch {
+    /// Numeric id of the element that painted the run.
+    pub element_id: f64,
+    /// Index of the run within that element. 0 for a plain `<text>`.
+    pub sub: f64,
+    /// The full string of the run, so `text.slice(start, end)` is the match.
+    pub text: String,
+    /// UTF-16 code-unit offsets into `text`, the units JS strings use.
+    pub start: f64,
+    pub end: f64,
+    pub active: bool,
+    pub rects: Vec<HighlightRect>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    derive(serde::Serialize)
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct HighlightRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl From<crate::text::PaintedHighlight> for HighlightMatch {
+    fn from(painted: crate::text::PaintedHighlight) -> Self {
+        Self {
+            element_id: painted.element_id as f64,
+            sub: painted.sub as f64,
+            text: painted.text.to_string(),
+            start: painted.start as f64,
+            end: painted.end as f64,
+            active: painted.active,
+            rects: painted
+                .rects
+                .into_iter()
+                .map(|(x, y, width, height)| HighlightRect {
+                    x: x as f64,
+                    y: y as f64,
+                    width: width as f64,
+                    height: height as f64,
+                })
+                .collect(),
         }
     }
 }

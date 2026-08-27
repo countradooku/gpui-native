@@ -1,4 +1,6 @@
 /target/
+dist-pages/
+web/pkg/
 node_modules/
 dist/
 *.node

@@ -25,6 +25,9 @@ export interface EventPayload {
   value?: string
   oldLine?: number
   newLine?: number
+  startIndex?: number
+  endIndex?: number
+  matchCount?: number
   modifiers?: EventModifiers
 }
 
@@ -50,6 +53,8 @@ export interface AudioBufferState {
 export interface NativeWindowOptions {
   /** Retain and test the native tree without opening a platform window. */
   headless?: boolean
+  /** Name used by macOS `Hide X` and `Quit X`; the executable owns the menu title. */
+  appName?: string
   title?: string
   width?: number
   height?: number
@@ -65,6 +70,46 @@ export interface NativeWindowOptions {
 }
 
 export type DimensionValue = number | string
+
+/** CSS cursor keywords implemented by GPUI. */
+export type CursorValue =
+  | "default"
+  | "auto"
+  | "pointer"
+  | "text"
+  | "vertical-text"
+  | "crosshair"
+  | "grab"
+  | "grabbing"
+  | "move"
+  | "all-scroll"
+  | "col-resize"
+  | "row-resize"
+  | "ew-resize"
+  | "ns-resize"
+  | "nwse-resize"
+  | "nesw-resize"
+  | "n-resize"
+  | "e-resize"
+  | "s-resize"
+  | "w-resize"
+  | "ne-resize"
+  | "nw-resize"
+  | "se-resize"
+  | "sw-resize"
+  | "not-allowed"
+  | "no-drop"
+  | "alias"
+  | "copy"
+  | "context-menu"
+
+export interface BoxShadow {
+  offsetX: number
+  offsetY: number
+  blurRadius: number
+  spreadRadius: number
+  color: string
+}
 
 export interface MotionStyle {
   width?: number
@@ -174,12 +219,17 @@ export interface StyleDesc {
   opacity?: number
 
   borderWidth?: number
+  borderTopWidth?: number
+  borderRightWidth?: number
+  borderBottomWidth?: number
+  borderLeftWidth?: number
   borderColor?: string
   borderRadius?: number
   borderTopLeftRadius?: number
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
+  boxShadow?: BoxShadow
 
   fontSize?: number
   fontFamily?: string
@@ -193,7 +243,7 @@ export interface StyleDesc {
   overflow?: string
   overflowX?: string
   overflowY?: string
-  cursor?: string
+  cursor?: CursorValue
   pointerEvents?: "auto" | "none"
   userSelect?: "text" | "none" | "auto"
   selectionColor?: string
@@ -233,11 +283,6 @@ export interface SyntaxTheme {
 export interface GpuiMetrics {
   codeTextSize?: number
   codeLineHeight?: number
-  codePaddingX?: number
-  codePaddingY?: number
-  codeRadius?: number
-  codeHeaderPaddingY?: number
-  codeHeaderTextSize?: number
   codeGutterDigitWidth?: number
   codeGutterPaddingRight?: number
   codeGutterMinWidth?: number
@@ -260,6 +305,11 @@ export interface GpuiMetrics {
   mdTableMinColumnWidth?: number
   mdTableMinColumnContent?: number
   mdInlineCodeRadius?: number
+  mdCodePaddingX?: number
+  mdCodePaddingY?: number
+  mdCodeRadius?: number
+  mdCodeHeaderPaddingY?: number
+  mdCodeHeaderTextSize?: number
 }
 
 export interface GpuiTheme {
@@ -283,13 +333,42 @@ export interface GpuiTheme {
   metrics?: GpuiMetrics
 }
 
+/** One native text-search/highlight declaration. */
+export interface HighlightSpec {
+  query?: string
+  caseSensitive?: boolean
+  wholeWord?: boolean
+  /** Explicit `[start, end)` pairs in UTF-16 code units. */
+  ranges?: Array<[number, number]>
+  color?: string
+  activeColor?: string
+  activeIndex?: number
+  /** Number of matches before a virtualized subtree. */
+  matchIndexOffset?: number
+  radius?: number
+}
+
+/** One highlight wash painted in the last frame. */
+export interface HighlightMatch {
+  elementId: number
+  sub: number
+  text: string
+  start: number
+  end: number
+  active: boolean
+  rects: Array<{ x: number; y: number; width: number; height: number }>
+}
+
 export type GpuiEventHandler = (event: EventPayload) => void
 
 export interface HostProps {
+  /** Vue reconciliation key; never forwarded to the native element. */
+  key?: PropertyKey
   style?: StyleDesc
   class?: string
   className?: string
   onClick?: GpuiEventHandler
+  onAuxClick?: GpuiEventHandler
   onMouseDown?: GpuiEventHandler
   onMouseUp?: GpuiEventHandler
   onMouseEnter?: GpuiEventHandler
@@ -307,6 +386,9 @@ export interface HostProps {
   onShowMore?: GpuiEventHandler
   onLineClick?: GpuiEventHandler
   onLinkClick?: GpuiEventHandler
+  onVisibleRange?: GpuiEventHandler
+  onHighlight?: GpuiEventHandler
+  highlight?: HighlightSpec | HighlightSpec[] | null
   autoFocus?: boolean
   tabIndex?: number
   testId?: string
@@ -325,12 +407,24 @@ export interface TextareaProps extends InputProps {
   maxRows?: number
 }
 
-export interface VirtualListProps extends HostProps {
+interface VirtualListShared extends HostProps {
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
-  estimatedItemHeight?: number
 }
+
+/** A variable-height list that builds only rows near its viewport. */
+export type VirtualListProps =
+  | (VirtualListShared & {
+      estimatedItemHeight?: number
+      itemCount?: never
+      windowStart?: never
+    })
+  | (VirtualListShared & {
+      itemCount: number
+      estimatedItemHeight: number
+      windowStart?: number
+    })
 
 export interface ImgProps extends HostProps {
   src?: string
@@ -340,6 +434,8 @@ export interface ImgProps extends HostProps {
 
 export interface SvgProps extends HostProps {
   src?: string
+  /** Raw SVG markup rendered directly by GPUI. */
+  source?: string
 }
 
 export type CanvasPathOperation =
@@ -420,7 +516,6 @@ export interface CodeProps extends HostProps {
   language?: string
   path?: string
   showLineNumbers?: boolean
-  showHeader?: boolean
   theme?: GpuiTheme
 }
 
@@ -475,6 +570,28 @@ export type GpuiElementType =
   | "virtual-list"
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export interface NativeWindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
+}
+
+export interface DebugFrameOverlayStats {
+  currentMs?: number
+  p90Ms?: number
+  p99Ms?: number
+  maxMs?: number
+  frames: number
+  samples: number
+}
 
 export interface WindowOptions extends NativeWindowOptions {
   onEvent?: (event: EventPayload) => void

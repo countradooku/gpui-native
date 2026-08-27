@@ -13,6 +13,7 @@ export {
   TestRenderer,
   type NativeGpuiTestRoot,
   type NativeTestElement,
+  type TestWindowOptions,
 } from "./native-testing.js"
 
 export class GpuiTestElement {

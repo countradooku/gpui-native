@@ -36,10 +36,41 @@ struct RegEntry {
     key: Arc<str>,
     text: SharedString,
     layout: TextLayout,
+    /// See [`selection::RegisteredText::group`].
+    group: Option<u64>,
+}
+
+/// Full element box that owns whether a press may start a selection.
+///
+/// `userSelect: "none"` chrome and native inputs register `selectable: false`
+/// so a same-row nearest-text clamp cannot steal their press. An explicit
+/// `userSelect: "text"` island registers `true` and can override an ancestor.
+struct StartRegion {
+    bounds: Bounds<gpui::Pixels>,
+    selectable: bool,
+}
+
+/// One highlight wash painted this frame, with the boxes it actually drew.
+///
+/// The rects are the point: a quad is invisible to `getPaintedText()`, and a
+/// match that soft-wraps must produce two boxes. Without the geometry the only
+/// way to assert that is a screenshot.
+#[derive(Clone, Debug)]
+pub struct PaintedHighlight {
+    pub element_id: u64,
+    pub sub: usize,
+    pub text: SharedString,
+    /// UTF-16 code-unit offsets, so JS can slice `text` directly.
+    pub start: usize,
+    pub end: usize,
+    pub active: bool,
+    /// `(x, y, width, height)` per visual row.
+    pub rects: Vec<(f32, f32, f32, f32)>,
 }
 
 thread_local! {
     static REGISTRY: RefCell<Vec<RegEntry>> = const { RefCell::new(Vec::new()) };
+    static START_REGIONS: RefCell<Vec<StartRegion>> = const { RefCell::new(Vec::new()) };
     /// Every string painted this frame, selectable or not, in paint order.
     ///
     /// Native elements draw their text inside gpui, so it never appears in the
@@ -47,18 +78,25 @@ thread_local! {
     /// way to assert what `<code>` or `<diff>` rendered is a screenshot, which
     /// tells you something changed but never what.
     static PAINTED: RefCell<Vec<SharedString>> = const { RefCell::new(Vec::new()) };
+    /// Same idea for highlight washes. See [`PaintedHighlight`].
+    static HIGHLIGHTS: RefCell<Vec<PaintedHighlight>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A zero-size canvas that clears the per-frame registries and installs the
-/// frame's copy listener. Paint it FIRST in the root, before any text, so each
-/// frame holds exactly that frame's visible text elements in paint order.
+/// frame's copy and mouse-down listeners. Paint it FIRST in the root, before
+/// any text, so each frame holds exactly that frame's visible text elements
+/// in paint order.
 pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |_, _, window, _| {
             REGISTRY.with(|r| r.borrow_mut().clear());
+            START_REGIONS.with(|r| r.borrow_mut().clear());
             PAINTED.with(|p| p.borrow_mut().clear());
+            HIGHLIGHTS.with(|h| h.borrow_mut().clear());
+            super::search::ordinal_frame_reset();
             register_copy_listener(window, &selection);
+            register_down_listener(window, &selection);
         },
     )
     .absolute()
@@ -66,9 +104,41 @@ pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
     .h(px(0.0))
 }
 
+/// Record a selection-start region from an element's painted box.
+///
+/// Only `bounds_tracker` calls this, so a start region is always the same box
+/// automation already uses. Last painted region that contains the point wins.
+pub fn record_start_region(bounds: Bounds<gpui::Pixels>, selectable: bool) {
+    START_REGIONS.with(|r| r.borrow_mut().push(StartRegion { bounds, selectable }));
+}
+
+/// Last painted start region that contains `position`.
+fn start_region_at(position: gpui::Point<gpui::Pixels>) -> Option<bool> {
+    START_REGIONS.with(|r| {
+        r.borrow()
+            .iter()
+            .rev()
+            .find(|region| region.bounds.contains(&position))
+            .map(|region| region.selectable)
+    })
+}
+
 /// Every string painted in the last frame, in paint order. Test-facing.
 pub fn painted_text() -> Vec<String> {
     PAINTED.with(|p| p.borrow().iter().map(|s| s.to_string()).collect())
+}
+
+/// Every highlight wash painted in the last frame, in paint order. Test-facing.
+pub fn painted_highlights() -> Vec<PaintedHighlight> {
+    HIGHLIGHTS.with(|h| h.borrow().clone())
+}
+
+/// Byte offset to UTF-16 code-unit offset, so the log speaks JS's units.
+fn utf16_offset(text: &str, byte: usize) -> usize {
+    text[..byte.min(text.len())]
+        .chars()
+        .map(char::len_utf16)
+        .sum()
 }
 
 /// Record text painted by a custom element that owns its text layout.
@@ -101,14 +171,29 @@ pub fn selection_key(element_id: u64, sub: usize) -> Arc<str> {
 }
 
 /// Inputs for [`selectable_text`].
+/// Where a run's highlight washes come from. Never both: retained text is
+/// located once for the whole subtree, while a string generated inside
+/// `render()` is matched against itself.
+#[derive(Clone)]
+pub enum HighlightSource {
+    /// Retained `<text>`. A match can span the several host nodes Vue makes
+    /// for one interpolated line, because they were merged before matching.
+    Resolved(Arc<super::search::HighlightContext>),
+    /// `<code>`, `<markdown>`, `<diff>`: text the retained tree never sees.
+    Native(Arc<super::search::HighlightContext>),
+}
+
 pub struct SelectableText {
+    /// Element that owns the run, and the run's index within it. The selection
+    /// key is derived from these, so nothing has to parse it back apart.
+    pub element_id: u64,
+    pub sub: usize,
     pub text: SharedString,
     /// `None` is the important case for plain `<text>` nodes: gpui then derives
     /// one run from `window.text_style()`, so colour, weight and family keep
     /// inheriting from ancestor `style` props. Pass `Some(..)` only when the
     /// element owns its own colours, as `<code>` and `<diff>` do.
     pub runs: Option<Vec<TextRun>>,
-    pub key: Arc<str>,
     pub selection: SharedSelection,
     pub wash_color: Hsla,
     /// Paints additional quads under the glyphs before the selection wash:
@@ -122,26 +207,34 @@ pub struct SelectableText {
     /// False under `userSelect: "none"`: the text is still painted, logged and
     /// clickable, but it does not join the selection registry.
     pub selectable: bool,
+    /// See [`crate::text::selection::RegisteredText::group`]. `None` for a run
+    /// that must never merge with its neighbour, which is every custom element.
+    pub group: Option<u64>,
+    pub highlight: Option<HighlightSource>,
 }
 
 impl SelectableText {
     pub fn new(
+        element_id: u64,
+        sub: usize,
         text: SharedString,
         runs: Option<Vec<TextRun>>,
-        key: Arc<str>,
         selection: SharedSelection,
         wash_color: Hsla,
     ) -> Self {
         Self {
+            element_id,
+            sub,
             text,
             runs,
-            key,
             selection,
             wash_color,
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
             selectable: true,
+            group: None,
+            highlight: None,
         }
     }
 }
@@ -151,16 +244,20 @@ impl SelectableText {
 /// mouse listeners.
 pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     let SelectableText {
+        element_id,
+        sub,
         text,
         runs,
-        key,
         selection,
         wash_color,
         extra_wash,
         links,
         on_link,
         selectable,
+        group,
+        highlight,
     } = opts;
+    let key = selection_key(element_id, sub);
 
     let styled = match runs {
         Some(runs) => StyledText::new(text.clone()).with_runs(runs),
@@ -174,6 +271,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
             if let Some(paint) = &extra_wash {
                 paint(&layout, window);
             }
+            // Search washes sit UNDER the selection wash, so a selection over a
+            // match still reads as a selection.
+            let washes = match &highlight {
+                Some(HighlightSource::Resolved(ctx)) => {
+                    super::search::washes_for_retained_run(ctx, &key)
+                }
+                Some(HighlightSource::Native(ctx)) => {
+                    super::search::washes_for_native_run(ctx, &key, &text)
+                }
+                None => Vec::new(),
+            };
+            paint_highlight_washes(&layout, element_id, sub, &text, &washes, window);
             if let Some(range) = selectable
                 .then(|| selection.lock().wash_range(&key))
                 .flatten()
@@ -195,9 +304,10 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                         key: key.clone(),
                         text: text.clone(),
                         layout: layout.clone(),
+                        group,
                     })
                 });
-                register_listeners(window, &key, &text, &layout, &selection);
+                register_listeners(window, &key, &selection);
             }
             PAINTED.with(|p| p.borrow_mut().push(text.clone()));
             if let Some(on_link) = &on_link {
@@ -213,6 +323,54 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .child(underlay)
         .child(styled)
         .into_any_element()
+}
+
+/// Paint one run's highlight washes and log their geometry.
+fn paint_highlight_washes(
+    layout: &TextLayout,
+    element_id: u64,
+    sub: usize,
+    text: &SharedString,
+    washes: &[super::search::Wash],
+    window: &mut Window,
+) {
+    for wash in washes {
+        let rects = range_rects(layout, &wash.range, 0.0, 0.0);
+        if rects.is_empty() {
+            continue;
+        }
+        for rect in &rects {
+            window.paint_quad(quad(
+                *rect,
+                px(wash.radius),
+                wash.color,
+                px(0.0),
+                gpui::transparent_black(),
+                BorderStyle::default(),
+            ));
+        }
+        HIGHLIGHTS.with(|h| {
+            h.borrow_mut().push(PaintedHighlight {
+                element_id,
+                sub,
+                text: text.clone(),
+                start: utf16_offset(text, wash.range.start),
+                end: utf16_offset(text, wash.range.end),
+                active: wash.active,
+                rects: rects
+                    .iter()
+                    .map(|r| {
+                        (
+                            f32::from(r.origin.x),
+                            f32::from(r.origin.y),
+                            f32::from(r.size.width),
+                            f32::from(r.size.height),
+                        )
+                    })
+                    .collect(),
+            })
+        });
+    }
 }
 
 /// Fire `on_link` for the range under a click.
@@ -269,11 +427,16 @@ fn register_link_listener(
 /// Prefers the element whose full bounds contain the point, taking the LAST
 /// such element in paint order so an overlay wins over what it covers. Only
 /// when the point is outside every text does it fall back to the nearest by
-/// vertical distance, which is what makes a drag into the gutter or past the
-/// end of a document clamp sensibly.
+/// vertical then horizontal distance. `index_for_position` then clamps: left
+/// of a line is the line start, right of a line is the line end.
+///
+/// Mouse-down uses [`registry_point_on_line`] so a press in a composer or
+/// titlebar does not start a selection on the nearest paragraph. The drag
+/// head keeps the unbounded clamp so a selection that already started can
+/// still run into the gutter or past the last line.
 ///
 /// Comet compares Y only, because its transcript is a single column where two
-/// texts never share a vertical band. GPUI Vue lays out arbitrary Vue trees: a
+/// texts never share a vertical band. gpui-vue lays out arbitrary Vue trees: a
 /// Y-only match picks the leftmost text in a flex row no matter where the
 /// pointer actually is.
 fn registry_point(position: gpui::Point<gpui::Pixels>) -> Option<(usize, usize)> {
@@ -322,6 +485,17 @@ fn registry_point(position: gpui::Point<gpui::Pixels>) -> Option<(usize, usize)>
     })
 }
 
+/// Like [`registry_point`], but only when the pointer shares a text's vertical
+/// band. That is the empty start or end of the line, a gutter, or parent
+/// padding on that row. A press above or below every line is chrome.
+fn registry_point_on_line(position: gpui::Point<gpui::Pixels>) -> Option<(usize, usize)> {
+    let (ei, ix) = registry_point(position)?;
+    REGISTRY.with(|r| {
+        let b = r.borrow().get(ei)?.layout.bounds();
+        (position.y >= b.top() && position.y <= b.bottom()).then_some((ei, ix))
+    })
+}
+
 /// Resolve anchor + head into document-ordered spans over the frame's registry.
 /// True when the selection changed.
 fn resolve_drag(
@@ -336,60 +510,96 @@ fn resolve_drag(
             // Anchor scrolled out of this frame — keep the spans we have.
             return false;
         };
-        let elements: Vec<(&str, &str)> = reg
+        let elements: Vec<selection::RegisteredText> = reg
             .iter()
-            .map(|e| (e.key.as_ref(), e.text.as_ref()))
+            .map(|e| selection::RegisteredText {
+                key: e.key.as_ref(),
+                text: e.text.as_ref(),
+                group: e.group,
+            })
             .collect();
         let spans = selection::resolve_spans(&elements, (anchor_ei, anchor_ix), head);
         selection.lock().update_spans(spans)
     })
 }
 
-/// Register this frame's window-level listeners for one text element.
+/// One window-level mouse-down for the whole frame.
+///
+/// Per-element downs required the press to land inside a `TextLayout` box,
+/// which is the glyph bounds, not the parent padding. A single listener
+/// clamps with [`registry_point_on_line`].
+fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
+    use gpui::{DispatchPhase, MouseButton, MouseDownEvent};
+
+    let selection = selection.clone();
+    window.on_mouse_event(move |e: &MouseDownEvent, phase, window, _cx| {
+        if phase != DispatchPhase::Bubble || e.button != MouseButton::Left {
+            return;
+        }
+        if start_region_at(e.position) == Some(false) {
+            let mut sel = selection.lock();
+            if !sel.is_active() {
+                return;
+            }
+            sel.clear();
+            drop(sel);
+            window.refresh();
+            return;
+        }
+        let hit = registry_point_on_line(e.position).and_then(|(ei, ix)| {
+            REGISTRY.with(|r| {
+                r.borrow()
+                    .get(ei)
+                    .map(|entry| (entry.key.clone(), entry.text.clone(), ix))
+            })
+        });
+        let mut sel = selection.lock();
+        let was_active = sel.is_active();
+        if let Some((key, text, ix)) = hit {
+            match e.click_count {
+                2 => {
+                    window.blur();
+                    let range = selection::word_range(&text, ix);
+                    sel.begin_with_span(&key, &text, range);
+                }
+                n if n >= 3 => {
+                    window.blur();
+                    sel.begin_with_span(&key, &text, 0..text.len());
+                }
+                // A tap must not select or blur. iOS uses that gesture to
+                // scroll or to focus an input; the first dragging move
+                // promotes this press into a real selection.
+                _ => sel.arm(&key, ix),
+            }
+        } else if sel.is_active() || sel.is_pending() {
+            sel.clear();
+        } else {
+            return;
+        }
+        let needs_refresh = was_active || sel.is_active();
+        drop(sel);
+        if needs_refresh {
+            window.refresh();
+        }
+    });
+}
+
+/// Register this frame's window-level move and up listeners for one text
+/// element. Down is registered once on the frame reset.
 ///
 /// Window-level, not element-level, so a drag keeps tracking after the mouse
 /// leaves the element's bounds. Frame-scoped, so paint re-registers every frame.
-fn register_listeners(
-    window: &mut Window,
-    key: &Arc<str>,
-    text: &SharedString,
-    layout: &TextLayout,
-    selection: &SharedSelection,
-) {
-    use gpui::{DispatchPhase, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent};
+fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSelection) {
+    use gpui::{DispatchPhase, MouseMoveEvent, MouseUpEvent};
 
-    {
-        let (key, text, layout, selection) =
-            (key.clone(), text.clone(), layout.clone(), selection.clone());
-        window.on_mouse_event(move |e: &MouseDownEvent, phase, window, _cx| {
-            if phase != DispatchPhase::Bubble || e.button != MouseButton::Left {
-                return;
-            }
-            if layout.bounds().contains(&e.position) {
-                let ix = match layout.index_for_position(e.position) {
-                    Ok(ix) | Err(ix) => ix,
-                };
-                let mut sel = selection.lock();
-                match e.click_count {
-                    2 => {
-                        let range = selection::word_range(&text, ix);
-                        sel.begin_with_span(&key, &text, range);
-                    }
-                    n if n >= 3 => sel.begin_with_span(&key, &text, 0..text.len()),
-                    _ => sel.begin(&key, ix),
-                }
-                drop(sel);
-                window.refresh();
-            } else if selection.lock().clear_if_owner(&key) {
-                window.refresh();
-            }
-        });
-    }
     {
         let (key, selection) = (key.clone(), selection.clone());
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, _cx| {
             if phase != DispatchPhase::Bubble || !e.dragging() {
                 return;
+            }
+            if selection.lock().promote_pending_for(&key) {
+                window.blur();
             }
             // Only the anchor element's listener drives the drag.
             let Some(anchor_ix) = selection.lock().drag_anchor(&key) else {
@@ -409,33 +619,30 @@ fn register_listeners(
             if phase != DispatchPhase::Bubble {
                 return;
             }
-            selection.lock().end_drag(&key);
+            let mut sel = selection.lock();
+            sel.cancel_pending();
+            sel.end_drag(&key);
         });
     }
 }
 
-/// Register the frame's single Cmd+C / Ctrl+C listener.
-///
-/// GPUI Vue has no keymap or action system, so this reads the raw keystroke.
-/// It lives on the frame reset rather than on each text element: registering it
-/// per element made one Cmd+C write the clipboard once per visible text node.
 fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
     use gpui::{ClipboardItem, DispatchPhase, KeyDownEvent};
 
     let selection = selection.clone();
-    window.on_key_event(move |e: &KeyDownEvent, phase, _window, cx| {
+    window.on_root_key_event(move |e: &KeyDownEvent, phase, _window, cx| {
         if phase != DispatchPhase::Bubble {
             return;
         }
-        let m = &e.keystroke.modifiers;
-        if e.keystroke.key != "c" || !(m.platform || m.control) {
+        let modifiers = &e.keystroke.modifiers;
+        if e.keystroke.key != "c" || !(modifiers.platform || modifiers.control) {
             return;
         }
-        // Read out of the lock before touching platform code: the clipboard
-        // backend is out of our control and must never run under our mutex.
+        // Release the selection lock before entering the platform clipboard.
         let text = selection.lock().selected_text();
         if let Some(text) = text {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.stop_propagation();
         }
     });
 }

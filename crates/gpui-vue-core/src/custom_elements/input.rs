@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
@@ -14,13 +14,14 @@ use gpui::{
     UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
+use web_time::Instant;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::renderer::{emit_event_full, EventCallback};
 use crate::theme::Theme;
 
 actions!(
-    gpui_vue_text_editor,
+    gpuix_text_editor,
     [
         Backspace,
         Delete,
@@ -59,8 +60,8 @@ actions!(
     ]
 );
 
-const INPUT_KEY_CONTEXT: &str = "GpuiVueInput";
-const TEXTAREA_KEY_CONTEXT: &str = "GpuiVueTextarea";
+const INPUT_KEY_CONTEXT: &str = "GpuixInput";
+const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const CARET_BLINK_MS: u64 = 500;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
@@ -85,12 +86,29 @@ fn single_line_text(text: &str) -> String {
 }
 
 pub fn init(cx: &mut App) {
-    let mut bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false);
-    bindings.extend(text_editor_bindings(TEXTAREA_KEY_CONTEXT, true));
+    let word_navigation_uses_alt = word_navigation_uses_alt();
+    let bind_paste_shortcut = !cfg!(all(target_arch = "wasm32", target_os = "unknown"));
+    let mut bindings = text_editor_bindings(
+        INPUT_KEY_CONTEXT,
+        false,
+        word_navigation_uses_alt,
+        bind_paste_shortcut,
+    );
+    bindings.extend(text_editor_bindings(
+        TEXTAREA_KEY_CONTEXT,
+        true,
+        word_navigation_uses_alt,
+        bind_paste_shortcut,
+    ));
     cx.bind_keys(bindings);
 }
 
-fn text_editor_bindings(context: &'static str, multiline: bool) -> Vec<KeyBinding> {
+fn text_editor_bindings(
+    context: &'static str,
+    multiline: bool,
+    word_navigation_uses_alt: bool,
+    bind_paste_shortcut: bool,
+) -> Vec<KeyBinding> {
     let context = Some(context);
     let mut bindings = vec![
         KeyBinding::new("enter", Submit, context),
@@ -125,7 +143,7 @@ fn text_editor_bindings(context: &'static str, multiline: bool) -> Vec<KeyBindin
         ]);
     }
 
-    let word_prefix = if cfg!(target_os = "macos") {
+    let word_prefix = if word_navigation_uses_alt {
         "alt"
     } else {
         "ctrl"
@@ -151,12 +169,36 @@ fn text_editor_bindings(context: &'static str, multiline: bool) -> Vec<KeyBindin
             KeyBinding::new(&format!("{prefix}-a"), SelectAll, context),
             KeyBinding::new(&format!("{prefix}-c"), Copy, context),
             KeyBinding::new(&format!("{prefix}-x"), Cut, context),
-            KeyBinding::new(&format!("{prefix}-v"), Paste, context),
             KeyBinding::new(&format!("{prefix}-z"), Undo, context),
             KeyBinding::new(&format!("shift-{prefix}-z"), Redo, context),
         ]);
+        if bind_paste_shortcut {
+            bindings.push(KeyBinding::new(&format!("{prefix}-v"), Paste, context));
+        }
     }
     bindings
+}
+
+fn browser_platform_is_macos(platform: &str, user_agent: &str) -> bool {
+    platform.starts_with("Mac")
+        || user_agent.contains("Macintosh")
+        || user_agent.contains("Mac OS X")
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn word_navigation_uses_alt() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let navigator = window.navigator();
+    let platform = navigator.platform().unwrap_or_default();
+    let user_agent = navigator.user_agent().unwrap_or_default();
+    browser_platform_is_macos(&platform, &user_agent)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn word_navigation_uses_alt() -> bool {
+    cfg!(target_os = "macos")
 }
 
 pub struct InputFactory;
@@ -312,6 +354,22 @@ impl CustomElement for TextEditorElement {
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_styles(editor, style);
         }
+        if ctx
+            .style
+            .and_then(|style| style.position.as_deref())
+            .is_none()
+        {
+            editor = editor.relative();
+        }
+        // Custom elements paint themselves, so nothing registers their box for
+        // automation unless the builder does it. Without this, a locator on an
+        // editor fails with "Element has no painted bounds" and `click()` has
+        // no target. `<div>` and `<text>` get this from `build_element`.
+        //
+        // `Some(false)` also claims the same box as a non-selectable
+        // selection-start region: a drag inside an editor must move the caret,
+        // not start a document selection.
+        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
@@ -344,7 +402,7 @@ impl CustomElement for TextEditorElement {
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
+    fn supported_props(&self) -> &'static [&'static str] {
         &[
             "value",
             "placeholder",
@@ -355,18 +413,7 @@ impl CustomElement for TextEditorElement {
         ]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        match key {
-            "value" => Some(self.value.clone().into()),
-            "placeholder" => Some(self.placeholder.clone().into()),
-            "readOnly" => Some(self.read_only.into()),
-            "minRows" => Some(self.min_rows.into()),
-            "maxRows" => Some(self.max_rows.into()),
-            _ => None,
-        }
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur",
         ]
@@ -925,6 +972,9 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.read_only {
+            window.request_text_input();
+        }
         window.focus(&self.focus_handle, cx);
         self.is_selecting = true;
         let index = self.index_for_mouse_position(event.position);
@@ -1542,6 +1592,67 @@ impl gpui::IntoElement for EditorTextElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
+        let keystroke = gpui::Keystroke::parse(keystroke).unwrap();
+        bindings.iter().any(|binding| {
+            binding.match_keystrokes(std::slice::from_ref(&keystroke)) == Some(false)
+                && binding.action().partial_eq(action)
+        })
+    }
+
+    #[test]
+    fn macos_word_navigation_uses_alt() {
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+
+        assert!(has_binding(&bindings, "alt-left", &WordLeft));
+        assert!(has_binding(&bindings, "alt-right", &WordRight));
+        assert!(!has_binding(&bindings, "ctrl-left", &WordLeft));
+        assert!(!has_binding(&bindings, "ctrl-right", &WordRight));
+    }
+
+    #[test]
+    fn non_macos_word_navigation_uses_control() {
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, false, true);
+
+        assert!(has_binding(&bindings, "ctrl-left", &WordLeft));
+        assert!(has_binding(&bindings, "ctrl-right", &WordRight));
+        assert!(!has_binding(&bindings, "alt-left", &WordLeft));
+        assert!(!has_binding(&bindings, "alt-right", &WordRight));
+    }
+
+    #[test]
+    fn browser_paste_stays_with_the_dom_event() {
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, false);
+
+        assert!(!has_binding(&bindings, "cmd-v", &Paste));
+        assert!(!has_binding(&bindings, "ctrl-v", &Paste));
+    }
+
+    #[test]
+    fn desktop_paste_uses_the_platform_clipboard_action() {
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+
+        assert!(has_binding(&bindings, "cmd-v", &Paste));
+        assert!(has_binding(&bindings, "ctrl-v", &Paste));
+    }
+
+    #[test]
+    fn browser_platform_detection_recognizes_macos() {
+        assert!(browser_platform_is_macos("MacIntel", ""));
+        assert!(browser_platform_is_macos(
+            "Unknown",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+        ));
+        assert!(!browser_platform_is_macos(
+            "Win32",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        ));
+        assert!(!browser_platform_is_macos(
+            "Linux x86_64",
+            "Mozilla/5.0 (X11; Linux x86_64)"
+        ));
+    }
 
     #[test]
     fn ime_offsets_are_relative_to_replacement_text() {

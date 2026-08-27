@@ -36,6 +36,7 @@ jobs:
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          target: wasm32-unknown-unknown
           cache: false
           rustflags: ""
 
@@ -76,30 +77,29 @@ jobs:
       - name: Build Vue examples with Vite and Oxc
         run: bun --filter '@gpui-vue/example-*' build
 
+      - name: Check WebAssembly renderer
+        run: cargo check --target wasm32-unknown-unknown --package gpui-vue-core --no-default-features
+        env:
+          RUSTC_BOOTSTRAP: "1"
+
   native:
     name: Native - ${{ matrix.settings.target }}
     strategy:
       fail-fast: false
       matrix:
+        # Keep this list identical to `packages/gpui-vue-native/package.json`.
+        # One architecture per OS avoids rebuilding the full GPUI stack for
+        # targets with no demonstrated demand.
         settings:
           - host: macos-latest
             target: aarch64-apple-darwin
             script: build
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            script: build
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             script: build:release
-          - host: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            script: build:release
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            script: build:release
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            script: build:release
+            script: build
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v7

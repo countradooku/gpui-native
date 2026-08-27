@@ -17,6 +17,7 @@ export const EVENT_PROPS = [
   ["onChange", "change"],
   ["onSubmit", "submit"],
   ["onClick", "click"],
+  ["onAuxClick", "auxClick"],
   ["onMouseDown", "mouseDown"],
   ["onMouseUp", "mouseUp"],
   ["onMouseEnter", "mouseEnter"],
@@ -28,6 +29,8 @@ export const EVENT_PROPS = [
   ["onFocus", "focus"],
   ["onBlur", "blur"],
   ["onScroll", "scroll"],
+  ["onVisibleRange", "visibleRange"],
+  ["onHighlight", "highlight"],
 ] as const
 
 const EVENT_TYPES = new Map<string, string>(EVENT_PROPS)

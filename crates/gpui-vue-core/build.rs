@@ -1,7 +1,7 @@
-extern crate napi_build;
-
 fn main() {
-    napi_build::setup();
+    if std::env::var("CARGO_CFG_TARGET_FAMILY").as_deref() != Ok("wasm") {
+        napi_build::setup();
+    }
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         if let Err(error) = linux_runtime_link_shims() {

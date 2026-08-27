@@ -73,13 +73,6 @@ impl CustomElement for MarkdownElement {
 
         let theme = self.theme.clone();
         let tree = self.tree();
-        if tree.is_empty() {
-            let mut empty = gpui::div();
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
-            return empty.into_any_element();
-        }
 
         // Link clicks are hit-tested per byte range inside the painted text, so
         // clicking prose emits nothing and clicking the second link emits the
@@ -104,6 +97,7 @@ impl CustomElement for MarkdownElement {
             ctx.selection_wash,
             theme.clone(),
             on_link,
+            ctx.highlight_set.clone(),
         );
         let body = render_tree(&tree, &mut md, window);
 
@@ -114,6 +108,8 @@ impl CustomElement for MarkdownElement {
             )))
             .flex()
             .flex_col()
+            .w_full()
+            .min_w_0()
             .text_color(theme.text)
             .font_family(theme.font_sans.clone())
             .text_size(gpui::px(theme.metrics.md_text_size))
@@ -135,18 +131,11 @@ impl CustomElement for MarkdownElement {
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
+    fn supported_props(&self) -> &'static [&'static str] {
         &["source", "theme"]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        match key {
-            "source" => Some(serde_json::Value::String(self.source.clone())),
-            _ => None,
-        }
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &["linkClick", "click", "mouseEnter", "mouseLeave"]
     }
 

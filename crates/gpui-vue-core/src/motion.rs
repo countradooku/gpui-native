@@ -1,8 +1,9 @@
 //! Native keyframe, tween, and spring tracks resolved outside Vue.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Deserialize;
+use web_time::Instant;
 
 use crate::style::{DimensionValue, StyleDesc};
 

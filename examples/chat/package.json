@@ -1,0 +1,23 @@
+{
+  "name": "@gpui-vue/example-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && vite build --config ../../vite.examples.config.mts",
+    "build:binary": "bun run build && bun run ../../scripts/compile-example.mts",
+    "start": "bun dist/main.js",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "gpui-vue": "workspace:^",
+    "vue": "^3.5.41"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^6.0.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.2.0"
+  }
+}

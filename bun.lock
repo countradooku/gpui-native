@@ -42,6 +42,21 @@
         "vue-tsc": "^3.2.0",
       },
     },
+    "examples/chat": {
+      "name": "@gpui-vue/example-chat",
+      "version": "0.1.0",
+      "dependencies": {
+        "gpui-vue": "workspace:^",
+        "vue": "^3.5.41",
+      },
+      "devDependencies": {
+        "@types/node": "^24.0.0",
+        "@vitejs/plugin-vue": "^6.0.3",
+        "typescript": "^5.9.3",
+        "vite": "^8.2.2",
+        "vue-tsc": "^3.2.0",
+      },
+    },
     "examples/counter": {
       "name": "@gpui-vue/example-counter",
       "version": "0.1.0",
@@ -128,6 +143,8 @@
     "@gpui-vue/example-audio-buffer": ["@gpui-vue/example-audio-buffer@workspace:examples/audio-buffer"],
 
     "@gpui-vue/example-canvas": ["@gpui-vue/example-canvas@workspace:examples/canvas"],
+
+    "@gpui-vue/example-chat": ["@gpui-vue/example-chat@workspace:examples/chat"],
 
     "@gpui-vue/example-counter": ["@gpui-vue/example-counter@workspace:examples/counter"],
 

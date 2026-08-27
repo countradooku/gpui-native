@@ -1,0 +1,11 @@
+{
+  "extends": "../examples/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "gpui-vue": ["../packages/gpui-vue/dist/web.d.ts"],
+      "@gpui-vue/wasm": ["../packages/gpui-vue/src/wasm-bindings.d.ts"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts"]
+}

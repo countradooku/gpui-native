@@ -14,7 +14,14 @@ import { GpuiRendererKey } from "./context.js"
 import { handleGpuiEvent } from "./events.js"
 import type { NativeRenderer } from "./native.js"
 import { createGpuiRenderer, type GpuiRendererHost } from "./renderer.js"
-import type { DebugFrameOverlayMode, EventPayload, StyleDesc } from "./types.js"
+import type {
+  DebugFrameOverlayMode,
+  DebugFrameOverlayStats,
+  EventPayload,
+  HighlightMatch,
+  StyleDesc,
+  WindowSize,
+} from "./types.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
@@ -23,17 +30,25 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateKeystrokes(keystrokes: string): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number): void
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
-  simulateMouseDown(x: number, y: number, button?: number): void
-  simulateMouseUp(x: number, y: number, button?: number): void
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+  ): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
+  simulateMouseDown(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
   getTreeJson(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   getRootId(): number | null
+  getWindowSize(): WindowSize
   getAllText(): string[]
   getPaintedText(): string[]
+  getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   getSelectedText(): string | null
   clearSelection(): void
@@ -45,6 +60,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
+  getDebugFrameOverlayStats(): DebugFrameOverlayStats
   captureScreenshot(path: string): void
   clockPause(): number
   clockSet(nowMs: number): number
@@ -53,7 +69,13 @@ interface NativeTestRendererApi extends NativeRenderer {
 }
 
 interface NativeTestRendererConstructor {
-  new (): NativeTestRendererApi
+  new (width?: number, height?: number): NativeTestRendererApi
+}
+
+/** Offscreen window size for a test root. Native defaults to 1280×800. */
+export interface TestWindowOptions {
+  width?: number
+  height?: number
 }
 
 const require = createRequire(import.meta.url)
@@ -64,7 +86,7 @@ try {
   }
   NativeTestRenderer = native.TestGpuiRenderer ?? null
 } catch {
-  // GPU-backed tests are optional and currently supplied by GPUI on macOS.
+  // GPU-backed tests are optional and supplied by GPUI on macOS and Windows.
 }
 
 export const hasNativeTestRenderer = NativeTestRenderer !== null
@@ -85,11 +107,13 @@ export class TestRenderer implements NativeRenderer {
   commitCount = 0
   readonly #native: NativeTestRendererApi
 
-  constructor() {
+  constructor(options: TestWindowOptions = {}) {
     if (NativeTestRenderer === null) {
-      throw new Error("Native TestGpuiRenderer is unavailable; build on macOS with test-support")
+      throw new Error(
+        "Native TestGpuiRenderer is unavailable; build on macOS or Windows with test-support",
+      )
     }
-    this.#native = new NativeTestRenderer()
+    this.#native = new NativeTestRenderer(options.width, options.height)
   }
 
   createElement(id: number, elementType: string): void {
@@ -190,36 +214,42 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
-  nativeSimulateClick(x: number, y: number): void {
+  nativeSimulateClick(x: number, y: number, button?: number, modifiers?: string): void {
     this.#native.flush()
-    this.#native.simulateClick(x, y)
+    this.#native.simulateClick(x, y, button, modifiers)
     this.dispatchNativeEvents()
     this.#native.flush()
   }
 
-  nativeSimulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void {
+  nativeSimulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+  ): void {
     this.#native.flush()
-    this.#native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.#native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
     this.dispatchNativeEvents()
   }
 
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void {
+  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void {
     this.#native.flush()
-    this.#native.simulateMouseMove(x, y, pressedButton)
+    this.#native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
     this.#native.flush()
   }
 
-  nativeSimulateMouseDown(x: number, y: number, button = 0): void {
+  nativeSimulateMouseDown(x: number, y: number, button = 0, modifiers?: string): void {
     this.#native.flush()
-    this.#native.simulateMouseDown(x, y, button)
+    this.#native.simulateMouseDown(x, y, button, modifiers)
     this.dispatchNativeEvents()
     this.#native.flush()
   }
 
-  nativeSimulateMouseUp(x: number, y: number, button = 0): void {
+  nativeSimulateMouseUp(x: number, y: number, button = 0, modifiers?: string): void {
     this.#native.flush()
-    this.#native.simulateMouseUp(x, y, button)
+    this.#native.simulateMouseUp(x, y, button, modifiers)
     this.dispatchNativeEvents()
     this.#native.flush()
   }
@@ -259,6 +289,14 @@ export class TestRenderer implements NativeRenderer {
 
   getPaintedText(): string[] {
     return this.#native.getPaintedText()
+  }
+
+  getPaintedHighlights(): HighlightMatch[] {
+    return this.#native.getPaintedHighlights()
+  }
+
+  getWindowSize(): WindowSize {
+    return this.#native.getWindowSize()
   }
 
   getSyntaxCacheStats(): [number, number, number] {
@@ -317,6 +355,10 @@ export class TestRenderer implements NativeRenderer {
 
   resetDebugFrameOverlayStats(): void {
     this.#native.resetDebugFrameOverlayStats()
+  }
+
+  getDebugFrameOverlayStats(): DebugFrameOverlayStats {
+    return this.#native.getDebugFrameOverlayStats()
   }
 
   captureScreenshot(path: string): void {
@@ -396,8 +438,8 @@ export interface NativeGpuiTestRoot {
 }
 
 /** Creates a Vue root backed by GPUI's native GPU test application. */
-export function createTestRoot(): NativeGpuiTestRoot {
-  const renderer = new TestRenderer()
+export function createTestRoot(options: TestWindowOptions = {}): NativeGpuiTestRoot {
+  const renderer = new TestRenderer(options)
   const host = createGpuiRenderer(renderer)
   let app: App | null = null
 

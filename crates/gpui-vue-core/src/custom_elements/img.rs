@@ -1,6 +1,6 @@
 /// Image custom elements for raster images and tintable SVG icons.
 ///
-/// This provides a native `<img>` for GPUI Vue Vue apps while keeping the same
+/// This provides a native `<img>` for gpui-vue apps while keeping the same
 /// custom-element prop pipeline (`setCustomProp`/`custom_props`).
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 
@@ -134,28 +134,11 @@ impl CustomElement for ImgElement {
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
+    fn supported_props(&self) -> &'static [&'static str] {
         &["src", "objectFit"]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        match key {
-            "src" => Some(serde_json::Value::String(self.src.clone())),
-            "objectFit" => Some(serde_json::Value::String(
-                match self.object_fit {
-                    ImgObjectFit::Fill => "fill",
-                    ImgObjectFit::Contain => "contain",
-                    ImgObjectFit::Cover => "cover",
-                    ImgObjectFit::ScaleDown => "scaleDown",
-                    ImgObjectFit::None => "none",
-                }
-                .to_string(),
-            )),
-            _ => None,
-        }
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &[]
     }
 
@@ -166,6 +149,7 @@ impl CustomElement for ImgElement {
 pub struct SvgElement {
     src: String,
     bytes: Option<std::sync::Arc<[u8]>>,
+    source: String,
 }
 
 impl SvgElement {
@@ -183,6 +167,9 @@ fn svg_bytes(src: &str) -> Option<Vec<u8>> {
         }
         return Some(percent_decode(data));
     }
+    #[cfg(target_family = "wasm")]
+    return None;
+    #[cfg(not(target_family = "wasm"))]
     std::fs::read(src).ok()
 }
 
@@ -216,7 +203,12 @@ impl CustomElement for SvgElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        let Some(bytes) = self.bytes.as_deref() else {
+        let bytes = if self.source.trim().is_empty() {
+            self.bytes.as_deref()
+        } else {
+            Some(self.source.as_bytes())
+        };
+        let Some(bytes) = bytes else {
             let mut empty = gpui::div();
             if let Some(style) = ctx.style {
                 empty = crate::renderer::apply_styles(empty, style);
@@ -227,8 +219,7 @@ impl CustomElement for SvgElement {
         let tint = ctx
             .style
             .and_then(|style| style.color.as_deref())
-            .and_then(crate::style::parse_color_hex)
-            .map(gpui::rgba)
+            .and_then(crate::color::parse_color_rgba)
             .unwrap_or_else(|| gpui::rgb(0xe2e2e2).into());
         let mut icon = gpui::svg().data(bytes).flex_none().text_color(tint);
         if let Some(style) = ctx.style {
@@ -238,20 +229,18 @@ impl CustomElement for SvgElement {
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
-        if key == "src" {
-            self.load_src(value.as_str().unwrap_or_default().to_string());
+        match key {
+            "src" => self.load_src(value.as_str().unwrap_or_default().to_string()),
+            "source" => self.source = value.as_str().unwrap_or_default().to_string(),
+            _ => {}
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
-        &["src"]
+    fn supported_props(&self) -> &'static [&'static str] {
+        &["src", "source"]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        (key == "src").then(|| serde_json::Value::String(self.src.clone()))
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &[]
     }
 

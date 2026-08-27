@@ -22,7 +22,7 @@ export const GPUI_ELEMENT_TYPES = [
 
 const ELEMENT_TYPE_SET = new Set<string>(GPUI_ELEMENT_TYPES)
 const BUILT_IN_TYPES = new Set<GpuiElementType>(["div", "text"])
-const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId"])
+const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId", "highlight"])
 const RESERVED_PROPS = new Set(["style", "class", "className", "children", "key", "ref"])
 
 export type GpuiNodeOps = Omit<RendererOptions<GpuiNode, GpuiContainer>, "patchProp">

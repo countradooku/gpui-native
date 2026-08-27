@@ -47,6 +47,13 @@ pub struct CustomRenderContext<'a> {
     pub selectable: bool,
     /// Inherited selection wash colour.
     pub selection_wash: gpui::Hsla,
+    /// `highlight` declared by the nearest ancestor, unresolved.
+    ///
+    /// A native element generates its text during `render()`, so the retained
+    /// tree never sees it and the build-time resolver cannot produce ranges for
+    /// it. `ctx.text` matches the exact string it is about to paint instead,
+    /// which makes drift between the search pass and the paint pass impossible.
+    pub highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
 }
 
 impl CustomRenderContext<'_> {
@@ -60,16 +67,21 @@ impl CustomRenderContext<'_> {
         runs: Option<Vec<gpui::TextRun>>,
     ) -> gpui::AnyElement {
         let text = text.into();
-        if !self.selectable {
-            return crate::text::chrome_text(text, runs);
-        }
-        crate::text::selectable_text(crate::text::SelectableText::new(
-            text,
-            runs,
-            crate::text::selection_key(self.id, sub),
-            self.selection.clone(),
-            self.selection_wash,
-        ))
+        crate::text::selectable_text(crate::text::SelectableText {
+            selectable: self.selectable,
+            highlight: self
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
+            ..crate::text::SelectableText::new(
+                self.id,
+                sub,
+                text,
+                runs,
+                self.selection.clone(),
+                self.selection_wash,
+            )
+        })
     }
 
     /// Chrome text: line numbers, language tags, file headers. Painted and
@@ -90,7 +102,7 @@ impl CustomRenderContext<'_> {
 ///
 /// Lifecycle:
 ///   1. Factory creates instance via CustomElementFactory::create()
-///   2. Vue sends props via set_prop() (called each GPUI frame before render)
+///   2. Registry synchronizes changed props and declared event capabilities
 ///   3. Each GPUI frame calls render() → returns AnyElement
 ///   4. Vue unmounts → destroy() for cleanup
 pub trait CustomElement: 'static {
@@ -103,18 +115,14 @@ pub trait CustomElement: 'static {
         cx: &mut gpui::Context<crate::renderer::GpuiView>,
     ) -> gpui::AnyElement;
 
-    /// Set a named prop from JS. Values are JSON-encoded.
-    /// Called when Vue updates props on this element.
+    /// Apply a changed prop from the retained tree. Removed props arrive as null.
     fn set_prop(&mut self, key: &str, value: serde_json::Value);
 
-    /// Return known prop keys. Missing keys are reset to null/default each frame.
-    fn supported_props(&self) -> &[&str];
+    /// Immutable prop capability declaration for this adapter.
+    fn supported_props(&self) -> &'static [&'static str];
 
-    /// Read a prop value back to JS. Returns None if prop doesn't exist.
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value>;
-
-    /// Return which event types this element can emit.
-    fn supported_events(&self) -> &[&str];
+    /// Immutable event capability declaration for this adapter.
+    fn supported_events(&self) -> &'static [&'static str];
 
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
@@ -132,10 +140,50 @@ pub trait CustomElementFactory: 'static {
 
 // ── Registry ─────────────────────────────────────────────────────────
 
-/// Stores factories (one per type) and live instances (one per element ID).
+/// Stores one custom adapter together with the state already synchronized into it.
+struct CustomElementEntry {
+    element_type: String,
+    element: Box<dyn CustomElement>,
+    applied_props: HashMap<String, serde_json::Value>,
+}
+
+impl CustomElementEntry {
+    fn sync(&mut self, props: &HashMap<String, serde_json::Value>) {
+        let supported_props = self.element.supported_props();
+        for &key in supported_props {
+            let value = props.get(key).cloned().unwrap_or(serde_json::Value::Null);
+            if self.applied_props.get(key) != Some(&value) {
+                self.element.set_prop(key, value.clone());
+                self.applied_props.insert(key.to_string(), value);
+            }
+        }
+
+        for (key, value) in props {
+            if supported_props.contains(&key.as_str()) || self.applied_props.get(key) == Some(value)
+            {
+                continue;
+            }
+            self.element.set_prop(key, value.clone());
+            self.applied_props.insert(key.clone(), value.clone());
+        }
+
+        let removed_unknown: Vec<String> = self
+            .applied_props
+            .keys()
+            .filter(|key| !supported_props.contains(&key.as_str()) && !props.contains_key(*key))
+            .cloned()
+            .collect();
+        for key in removed_unknown {
+            self.element.set_prop(&key, serde_json::Value::Null);
+            self.applied_props.remove(&key);
+        }
+    }
+}
+
+/// Stores factories (one per type) and live adapters (one per element ID).
 pub struct CustomElementRegistry {
     factories: HashMap<String, Box<dyn CustomElementFactory>>,
-    instances: HashMap<u64, Box<dyn CustomElement>>,
+    instances: HashMap<u64, CustomElementEntry>,
 }
 
 impl CustomElementRegistry {
@@ -166,25 +214,65 @@ impl CustomElementRegistry {
             .insert(factory.element_type().to_string(), factory);
     }
 
-    /// Get an existing instance or create one via the factory.
-    /// Returns None if no factory is registered for this element type.
-    pub fn get_or_create(
-        &mut self,
-        id: u64,
-        element_type: &str,
-    ) -> Option<&mut Box<dyn CustomElement>> {
-        if !self.instances.contains_key(&id) {
-            let factory = self.factories.get(element_type)?;
-            let instance = factory.create(id);
-            self.instances.insert(id, instance);
+    /// Get an existing adapter or create one via the registered factory.
+    /// Reusing an ID for another type destroys the old adapter first.
+    fn get_or_create(&mut self, id: u64, element_type: &str) -> Option<&mut CustomElementEntry> {
+        if self
+            .instances
+            .get(&id)
+            .is_some_and(|entry| entry.element_type != element_type)
+        {
+            self.destroy(id);
         }
-        self.instances.get_mut(&id)
+
+        match self.instances.entry(id) {
+            std::collections::hash_map::Entry::Occupied(entry) => Some(entry.into_mut()),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let factory = self.factories.get(element_type)?;
+                Some(entry.insert(CustomElementEntry {
+                    element_type: element_type.to_string(),
+                    element: factory.create(id),
+                    applied_props: HashMap::new(),
+                }))
+            }
+        }
+    }
+
+    /// Synchronize one retained frame into an adapter and render it.
+    pub fn render(
+        &mut self,
+        element_type: &str,
+        props: &HashMap<String, serde_json::Value>,
+        ctx: CustomRenderContext,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<crate::renderer::GpuiView>,
+    ) -> gpui::AnyElement {
+        use gpui::IntoElement;
+
+        let Some(entry) = self.get_or_create(ctx.id, element_type) else {
+            log::warn!("Unknown element type: {element_type}");
+            return gpui::Empty.into_any_element();
+        };
+
+        entry.sync(props);
+        let supported = entry.element.supported_events();
+        let filtered: HashSet<String> = ctx
+            .events
+            .iter()
+            .filter(|event| supported.contains(&event.as_str()))
+            .cloned()
+            .collect();
+        let ctx = CustomRenderContext {
+            events: &filtered,
+            ..ctx
+        };
+        entry.element.render(ctx, window, cx)
     }
 
     /// Called when Vue destroys an element.
     pub fn destroy(&mut self, id: u64) {
-        if let Some(mut el) = self.instances.remove(&id) {
-            el.destroy();
+        if let Some(mut entry) = self.instances.remove(&id) {
+            entry.element.destroy();
         }
     }
 
@@ -205,8 +293,133 @@ impl CustomElementRegistry {
         }
     }
 
-    /// Check if a type name has a registered factory.
-    pub fn is_custom_type(&self, element_type: &str) -> bool {
-        self.factories.contains_key(element_type)
+    /// Destroy every live instance. Only for app teardown.
+    ///
+    /// An instance can hold a `gpui::Entity` handle: `<input>` keeps an
+    /// `Entity<TextEditorState>`. gpui's leak detector panics if any handle is
+    /// still alive when the `App` drops, so the registry has to be emptied
+    /// while the `App` is still there.
+    pub fn destroy_all(&mut self) {
+        let ids: Vec<u64> = self.instances.keys().copied().collect();
+        for id in ids {
+            self.destroy(id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use super::*;
+
+    struct RecordingElement {
+        updates: Rc<RefCell<Vec<(String, serde_json::Value)>>>,
+        destroyed: Rc<Cell<usize>>,
+    }
+
+    impl CustomElement for RecordingElement {
+        fn render(
+            &mut self,
+            _ctx: CustomRenderContext,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<crate::renderer::GpuiView>,
+        ) -> gpui::AnyElement {
+            unreachable!("prop synchronization does not render")
+        }
+
+        fn set_prop(&mut self, key: &str, value: serde_json::Value) {
+            self.updates.borrow_mut().push((key.to_string(), value));
+        }
+
+        fn supported_props(&self) -> &'static [&'static str] {
+            &["source"]
+        }
+
+        fn supported_events(&self) -> &'static [&'static str] {
+            &["click"]
+        }
+
+        fn destroy(&mut self) {
+            self.destroyed.set(self.destroyed.get() + 1);
+        }
+    }
+
+    struct RecordingFactory {
+        element_type: &'static str,
+        updates: Rc<RefCell<Vec<(String, serde_json::Value)>>>,
+        destroyed: Rc<Cell<usize>>,
+    }
+
+    impl CustomElementFactory for RecordingFactory {
+        fn element_type(&self) -> &str {
+            self.element_type
+        }
+
+        fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+            Box::new(RecordingElement {
+                updates: self.updates.clone(),
+                destroyed: self.destroyed.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn sync_applies_only_changes_and_resets_removed_unknown_props() {
+        let updates = Rc::new(RefCell::new(Vec::new()));
+        let destroyed = Rc::new(Cell::new(0));
+        let mut entry = CustomElementEntry {
+            element_type: "recording".to_string(),
+            element: Box::new(RecordingElement {
+                updates: updates.clone(),
+                destroyed,
+            }),
+            applied_props: HashMap::new(),
+        };
+        let props = HashMap::from([
+            ("source".to_string(), serde_json::json!("first")),
+            ("future".to_string(), serde_json::json!(true)),
+        ]);
+        entry.sync(&props);
+        assert_eq!(
+            updates.borrow().as_slice(),
+            [
+                ("source".to_string(), serde_json::json!("first")),
+                ("future".to_string(), serde_json::json!(true)),
+            ]
+        );
+
+        entry.sync(&props);
+        assert_eq!(updates.borrow().len(), 2);
+
+        entry.sync(&HashMap::new());
+        assert_eq!(
+            updates.borrow().as_slice(),
+            [
+                ("source".to_string(), serde_json::json!("first")),
+                ("future".to_string(), serde_json::json!(true)),
+                ("source".to_string(), serde_json::Value::Null),
+                ("future".to_string(), serde_json::Value::Null),
+            ]
+        );
+    }
+
+    #[test]
+    fn reusing_an_id_for_another_type_destroys_the_previous_adapter() {
+        let updates = Rc::new(RefCell::new(Vec::new()));
+        let destroyed = Rc::new(Cell::new(0));
+        let mut registry = CustomElementRegistry::new();
+        for element_type in ["first", "second"] {
+            registry.register(Box::new(RecordingFactory {
+                element_type,
+                updates: updates.clone(),
+                destroyed: destroyed.clone(),
+            }));
+        }
+
+        assert!(registry.get_or_create(42, "first").is_some());
+        assert!(registry.get_or_create(42, "second").is_some());
+        assert_eq!(destroyed.get(), 1);
     }
 }

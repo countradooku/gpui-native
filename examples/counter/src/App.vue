@@ -70,6 +70,16 @@ const buttonStyle: StyleDesc = {
   active: { opacity: 0.7 },
 }
 
+// <code> is deliberately a bare primitive; the app owns its card surface.
+const codeStyle: StyleDesc = {
+  width: "100%",
+  padding: 12,
+  background: "#11151e",
+  borderWidth: 1,
+  borderColor: "#293044",
+  borderRadius: 8,
+}
+
 const entrance: MotionStyle = { opacity: 1, top: 0 }
 const entranceTransition: MotionTransition = {
   duration: 0.35,
@@ -114,7 +124,7 @@ function handleKeyDown(event: EventPayload): void {
         :code="`const count = ${count}`"
         language="typescript"
         :showLineNumbers="false"
-        :style="{ width: '100%' }"
+        :style="codeStyle"
       />
     </MotionDiv>
   </div>

@@ -8,7 +8,7 @@
 //!   patch={unifiedPatch}
 //!   wordDiff
 //!   maxLines={24}
-//!   collapsedPaths={['bun.lock']}
+//!   collapsedPaths={['pnpm-lock.yaml']}
 //!   onToggleFile={(e) => {}}
 //!   onShowMore={(e) => {}}
 //! />
@@ -273,6 +273,7 @@ impl CustomElement for DiffElement {
         let selection = ctx.selection.clone();
         let selectable = ctx.selectable;
         let wash = ctx.selection_wash;
+        let highlight_set = ctx.highlight_set.clone();
         let callback = ctx.event_callback.clone();
         let wants_toggle = ctx.events.contains("toggleFile");
         let wants_line_click = ctx.events.contains("lineClick");
@@ -330,6 +331,7 @@ impl CustomElement for DiffElement {
                         selection: &selection,
                         selectable,
                         wash,
+                        highlight_set: highlight_set.clone(),
                         callback: &callback,
                         wants_toggle,
                         wants_line_click,
@@ -355,6 +357,7 @@ impl CustomElement for DiffElement {
                         selection: &selection,
                         selectable,
                         wash,
+                        highlight_set: highlight_set.clone(),
                         callback: &callback,
                         wants_toggle,
                         wants_line_click,
@@ -408,7 +411,7 @@ impl CustomElement for DiffElement {
         }
     }
 
-    fn supported_props(&self) -> &[&str] {
+    fn supported_props(&self) -> &'static [&'static str] {
         &[
             "patch",
             "wordDiff",
@@ -419,14 +422,7 @@ impl CustomElement for DiffElement {
         ]
     }
 
-    fn get_prop(&self, key: &str) -> Option<serde_json::Value> {
-        match key {
-            "patch" => Some(serde_json::Value::String(self.patch.clone())),
-            _ => None,
-        }
-    }
-
-    fn supported_events(&self) -> &[&str] {
+    fn supported_events(&self) -> &'static [&'static str] {
         &[
             "toggleFile",
             "showMore",
@@ -451,6 +447,9 @@ struct RowContext<'a> {
     selection: &'a SharedSelection,
     selectable: bool,
     wash: Hsla,
+    /// Inherited `highlight`, matched per painted row. See
+    /// [`crate::text::search::washes_for_native_run`].
+    highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
     callback: &'a Option<crate::renderer::EventCallback>,
     wants_toggle: bool,
     wants_line_click: bool,
@@ -478,15 +477,21 @@ impl RowContext<'_> {
         runs: Option<Vec<gpui::TextRun>>,
         extra_wash: Option<Box<dyn Fn(&gpui::TextLayout, &mut gpui::Window)>>,
     ) -> gpui::AnyElement {
-        if !self.selectable {
-            return crate::text::chrome_text(SharedString::from(text), runs);
-        }
+        // Content, not chrome: `userSelect: "none"` stops the drag, not the
+        // find. `chrome_text` cannot paint a highlight wash, so it stays for
+        // the gutter and the file header only.
         crate::text::selectable_text(crate::text::SelectableText {
             extra_wash,
+            selectable: self.selectable,
+            highlight: self
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
             ..crate::text::SelectableText::new(
+                self.element_id,
+                sub,
                 SharedString::from(text),
                 runs,
-                crate::text::selection_key(self.element_id, sub),
                 self.selection.clone(),
                 self.wash,
             )
