@@ -2,22 +2,28 @@
 //!
 //! Caret blinking is ported from Comet's `crates/ui/src/composer.rs` (MIT).
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "bounded text indices and clock values cross GPUI geometry and platform time representations"
+)]
+
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
-    CursorStyle, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, GlobalElementId,
-    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun, TextStyle, UTF16Selection,
-    UnderlineStyle, Window, WrappedLine,
+    App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, GlobalElementId, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
+    SharedString, Style, Task, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window,
+    WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::renderer::{emit_event_full, EventCallback};
+use crate::renderer::{EventCallback, emit_event_full};
 use crate::theme::Theme;
 
 actions!(
@@ -63,9 +69,11 @@ actions!(
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const CARET_BLINK_MS: u64 = 500;
+const MAX_EDIT_HISTORY_ENTRIES: usize = 256;
+const MAX_EDIT_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
-    (ms_since_activity / CARET_BLINK_MS) % 2 == 0
+    (ms_since_activity / CARET_BLINK_MS).is_multiple_of(2)
 }
 
 fn utf16_offset_to_utf8(text: &str, offset: usize) -> usize {
@@ -83,6 +91,31 @@ fn utf16_offset_to_utf8(text: &str, offset: usize) -> usize {
 
 fn single_line_text(text: &str) -> String {
     text.replace("\r\n", " ").replace(['\r', '\n'], " ")
+}
+
+fn remap_offset_after_external_edit(old: &str, new: &str, offset: usize) -> usize {
+    let prefix = old
+        .chars()
+        .zip(new.chars())
+        .take_while(|(old, new)| old == new)
+        .map(|(character, _)| character.len_utf8())
+        .sum::<usize>();
+    let suffix = old[prefix..]
+        .chars()
+        .rev()
+        .zip(new[prefix..].chars().rev())
+        .take_while(|(old, new)| old == new)
+        .map(|(character, _)| character.len_utf8())
+        .sum::<usize>();
+    let old_changed_end = old.len().saturating_sub(suffix);
+    let new_changed_end = new.len().saturating_sub(suffix);
+    match offset.min(old.len()) {
+        offset if offset <= prefix => offset,
+        offset if offset >= old_changed_end => {
+            new_changed_end + offset.saturating_sub(old_changed_end)
+        }
+        _ => new_changed_end,
+    }
 }
 
 pub fn init(cx: &mut App) {
@@ -179,6 +212,7 @@ fn text_editor_bindings(
     bindings
 }
 
+#[cfg(any(test, all(target_arch = "wasm32", target_os = "unknown")))]
 fn browser_platform_is_macos(platform: &str, user_agent: &str) -> bool {
     platform.starts_with("Mac")
         || user_agent.contains("Macintosh")
@@ -204,7 +238,7 @@ fn word_navigation_uses_alt() -> bool {
 pub struct InputFactory;
 
 impl CustomElementFactory for InputFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "input"
     }
 
@@ -216,7 +250,7 @@ impl CustomElementFactory for InputFactory {
 pub struct TextareaFactory;
 
 impl CustomElementFactory for TextareaFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "textarea"
     }
 
@@ -254,6 +288,10 @@ impl TextEditorElement {
 }
 
 impl CustomElement for TextEditorElement {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "editor prop synchronization is one ordered retained-state transaction"
+    )]
     fn render(
         &mut self,
         ctx: CustomRenderContext,
@@ -280,6 +318,9 @@ impl CustomElement for TextEditorElement {
                 let min_rows = self.min_rows;
                 let max_rows = self.max_rows;
                 let caret_color = self.theme.caret;
+                let placeholder_color = self.theme.text_faint;
+                let mut selection_color = self.theme.accent;
+                selection_color.a = 0.35;
                 let callback = callback.clone();
                 let id = ctx.id;
                 let cursor = value.len();
@@ -307,17 +348,22 @@ impl CustomElement for TextEditorElement {
                     follow_cursor: true,
                     last_lines: Vec::new(),
                     line_starts: vec![0],
+                    line_y_offsets: vec![px(0.0)],
                     last_bounds: None,
                     line_height: px(20.0),
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
                     caret_color,
+                    placeholder_color,
+                    selection_color,
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
-                    undo_stack: Vec::new(),
-                    redo_stack: Vec::new(),
+                    undo_stack: VecDeque::new(),
+                    redo_stack: VecDeque::new(),
+                    undo_bytes: 0,
+                    redo_bytes: 0,
                 })
             })
             .clone();
@@ -337,13 +383,16 @@ impl CustomElement for TextEditorElement {
                 state.caret_color = self.theme.caret;
                 cx.notify();
             }
+            state.placeholder_color = self.theme.text_faint;
+            state.selection_color = self.theme.accent;
+            state.selection_color.a = 0.35;
             if prop_changed {
                 state.sync_prop_value(self.value.clone(), cx);
             }
         });
         self.last_prop_value = Some(self.value.clone());
 
-        let element_id = gpui::SharedString::from(format!("__gpui_vue_editor_{}", ctx.id));
+        let element_id = super::custom_element_id("__gpui_vue_editor", ctx.id);
         let mut editor = div()
             .id(element_id)
             .flex()
@@ -352,7 +401,7 @@ impl CustomElement for TextEditorElement {
             .track_focus(&focus_handle)
             .child(state);
         if let Some(style) = ctx.style {
-            editor = crate::renderer::apply_styles(editor, style);
+            editor = crate::renderer::apply_interactive_styles(editor, style);
         }
         if ctx
             .style
@@ -395,7 +444,7 @@ impl CustomElement for TextEditorElement {
                 self.max_rows = value
                     .as_u64()
                     .unwrap_or(if self.multiline { 10 } else { 1 })
-                    as usize
+                    as usize;
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
@@ -431,6 +480,10 @@ struct EditSnapshot {
     selection_reversed: bool,
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent editor capabilities and event subscriptions are explicit state flags"
+)]
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
@@ -454,17 +507,22 @@ struct TextEditorState {
     follow_cursor: bool,
     last_lines: Vec<WrappedLine>,
     line_starts: Vec<usize>,
+    line_y_offsets: Vec<Pixels>,
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
     caret_color: gpui::Hsla,
+    placeholder_color: gpui::Hsla,
+    selection_color: gpui::Hsla,
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
-    undo_stack: Vec<EditSnapshot>,
-    redo_stack: Vec<EditSnapshot>,
+    undo_stack: VecDeque<EditSnapshot>,
+    redo_stack: VecDeque<EditSnapshot>,
+    undo_bytes: usize,
+    redo_bytes: usize,
 }
 
 impl TextEditorState {
@@ -479,12 +537,14 @@ impl TextEditorState {
         }
         if self.blink_task.is_none() {
             self.reset_blink(cx);
-            self.blink_task = Some(cx.spawn(async move |this, cx| loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(CARET_BLINK_MS))
-                    .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
+            self.blink_task = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(CARET_BLINK_MS))
+                        .await;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
+                    }
                 }
             }));
         }
@@ -497,6 +557,43 @@ impl TextEditorState {
             selected_range: self.selected_range.clone(),
             selection_reversed: self.selection_reversed,
         }
+    }
+
+    fn push_history(
+        stack: &mut VecDeque<EditSnapshot>,
+        retained_bytes: &mut usize,
+        snapshot: EditSnapshot,
+    ) {
+        *retained_bytes = retained_bytes.saturating_add(snapshot.content.len());
+        stack.push_back(snapshot);
+        while stack.len() > MAX_EDIT_HISTORY_ENTRIES || *retained_bytes > MAX_EDIT_HISTORY_BYTES {
+            let Some(discarded) = stack.pop_front() else {
+                break;
+            };
+            *retained_bytes = retained_bytes.saturating_sub(discarded.content.len());
+        }
+    }
+
+    fn pop_history(
+        stack: &mut VecDeque<EditSnapshot>,
+        retained_bytes: &mut usize,
+    ) -> Option<EditSnapshot> {
+        let snapshot = stack.pop_back()?;
+        *retained_bytes = retained_bytes.saturating_sub(snapshot.content.len());
+        Some(snapshot)
+    }
+
+    fn clear_redo_history(&mut self) {
+        self.redo_stack.clear();
+        self.redo_bytes = 0;
+    }
+
+    fn push_undo(&mut self, snapshot: EditSnapshot) {
+        Self::push_history(&mut self.undo_stack, &mut self.undo_bytes, snapshot);
+    }
+
+    fn push_redo(&mut self, snapshot: EditSnapshot) {
+        Self::push_history(&mut self.redo_stack, &mut self.redo_bytes, snapshot);
     }
 
     fn sync_prop_value(&mut self, value: String, cx: &mut Context<Self>) {
@@ -516,17 +613,17 @@ impl TextEditorState {
         if self.content == value {
             return;
         }
-        self.content = value;
-        let end = self.content.len();
-        self.selected_range = end..end;
-        self.selection_reversed = false;
-        self.marked_range = None;
-        self.scroll_top = 0.0;
-        self.scroll_left = 0.0;
+        let old_content = std::mem::replace(&mut self.content, value);
+        let map_offset =
+            |offset| remap_offset_after_external_edit(&old_content, &self.content, offset);
+        self.selected_range =
+            map_offset(self.selected_range.start)..map_offset(self.selected_range.end);
+        self.marked_range = self
+            .marked_range
+            .as_ref()
+            .map(|range| map_offset(range.start)..map_offset(range.end));
         self.follow_cursor = true;
         self.reset_blink(cx);
-        self.undo_stack.clear();
-        self.redo_stack.clear();
         cx.notify();
     }
 
@@ -630,12 +727,10 @@ impl TextEditorState {
     fn line_range_at(&self, offset: usize) -> Range<usize> {
         let start = self.content[..offset]
             .rfind('\n')
-            .map(|index| index + 1)
-            .unwrap_or(0);
+            .map_or(0, |index| index + 1);
         let end = self.content[offset..]
             .find('\n')
-            .map(|index| offset + index)
-            .unwrap_or(self.content.len());
+            .map_or(self.content.len(), |index| offset + index);
         start..end
     }
 
@@ -880,8 +975,9 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
-        if let Some(previous) = self.undo_stack.pop() {
-            self.redo_stack.push(self.snapshot());
+        if let Some(previous) = Self::pop_history(&mut self.undo_stack, &mut self.undo_bytes) {
+            let current = self.snapshot();
+            self.push_redo(current);
             self.restore(previous, cx);
         }
     }
@@ -890,8 +986,9 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
-        if let Some(next) = self.redo_stack.pop() {
-            self.undo_stack.push(self.snapshot());
+        if let Some(next) = Self::pop_history(&mut self.redo_stack, &mut self.redo_bytes) {
+            let current = self.snapshot();
+            self.push_undo(current);
             self.restore(next, cx);
         }
     }
@@ -919,41 +1016,48 @@ impl TextEditorState {
     }
 
     fn point_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        for (line_index, line) in self.last_lines.iter().enumerate() {
-            let line_start = *self.line_starts.get(line_index)?;
-            if index < line_start || index > line_start + line.len() {
-                continue;
-            }
-            let local = line.position_for_index(index - line_start, self.line_height)?;
-            let y_offset: Pixels = self
-                .last_lines
-                .iter()
-                .take(line_index)
-                .map(|line| line.size(self.line_height).height)
-                .sum();
-            return Some(point(local.x, local.y + y_offset));
-        }
-        None
+        let line_index = self
+            .line_starts
+            .partition_point(|line_start| *line_start <= index)
+            .saturating_sub(1)
+            .min(self.last_lines.len().saturating_sub(1));
+        let line = self.last_lines.get(line_index)?;
+        let line_start = *self.line_starts.get(line_index)?;
+        let local = line.position_for_index(
+            index.saturating_sub(line_start).min(line.len()),
+            self.line_height,
+        )?;
+        Some(point(
+            local.x,
+            local.y + self.line_y_offsets.get(line_index).copied()?,
+        ))
     }
 
     fn index_for_point(&self, position: Point<Pixels>) -> usize {
         if self.display_is_placeholder {
             return 0;
         }
-        let mut y = f32::from(position.y).max(0.0);
-        for (line_index, line) in self.last_lines.iter().enumerate() {
-            let height = f32::from(line.size(self.line_height).height);
-            let line_start = self.line_starts.get(line_index).copied().unwrap_or(0);
-            if y < height || line_index + 1 == self.last_lines.len() {
-                let local = point(position.x, px(y.min(height - 1.0).max(0.0)));
-                let index = line
-                    .closest_index_for_position(local, self.line_height)
-                    .unwrap_or_else(|index| index);
-                return (line_start + index).min(self.content.len());
-            }
-            y -= height;
-        }
-        self.content.len()
+        let y = f32::from(position.y).max(0.0);
+        let line_index = self
+            .line_y_offsets
+            .partition_point(|offset| f32::from(*offset) <= y)
+            .saturating_sub(1)
+            .min(self.last_lines.len().saturating_sub(1));
+        let Some(line) = self.last_lines.get(line_index) else {
+            return self.content.len();
+        };
+        let line_top = self
+            .line_y_offsets
+            .get(line_index)
+            .copied()
+            .map(f32::from)
+            .unwrap_or_default();
+        let height = f32::from(line.size(self.line_height).height);
+        let local = point(position.x, px((y - line_top).min(height - 1.0).max(0.0)));
+        let index = line
+            .closest_index_for_position(local, self.line_height)
+            .unwrap_or_else(|index| index);
+        (self.line_starts.get(line_index).copied().unwrap_or(0) + index).min(self.content.len())
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
@@ -1050,6 +1154,9 @@ impl TextEditorState {
         self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
     }
 
+    // Clippy's method-reference rewrite names SmallVec's transitive crate, which is
+    // intentionally not part of this crate's public dependency surface.
+    #[allow(clippy::redundant_closure_for_method_calls)]
     fn layout_text(&mut self, width: Pixels, style: &TextStyle, window: &mut Window) -> f32 {
         let (display, is_placeholder) = if self.content.is_empty() {
             (self.placeholder.clone(), true)
@@ -1059,7 +1166,7 @@ impl TextEditorState {
         let font_size = style.font_size.to_pixels(window.rem_size());
         self.line_height = window.line_height();
         let color = if is_placeholder {
-            gpui::rgba(0x8f8f8fff).into()
+            self.placeholder_color
         } else {
             style.color
         };
@@ -1093,19 +1200,20 @@ impl TextEditorState {
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         let mut line_starts = Vec::with_capacity(lines.len());
+        let mut line_y_offsets = Vec::with_capacity(lines.len());
         let mut offset = 0;
+        let mut y_offset = 0.0;
         for line in &lines {
             line_starts.push(offset);
+            line_y_offsets.push(px(y_offset));
             offset += line.len() + 1;
+            y_offset += f32::from(line.size(self.line_height).height);
         }
         if line_starts.is_empty() {
             line_starts.push(0);
+            line_y_offsets.push(px(0.0));
         }
-        self.content_height = lines
-            .iter()
-            .map(|line| f32::from(line.size(self.line_height).height))
-            .sum::<f32>()
-            .max(f32::from(self.line_height));
+        self.content_height = y_offset.max(f32::from(self.line_height));
         self.content_width = lines
             .iter()
             .map(|line| f32::from(line.unwrapped_layout.width))
@@ -1113,27 +1221,26 @@ impl TextEditorState {
         self.display_is_placeholder = is_placeholder;
         self.last_lines = lines;
         self.line_starts = line_starts;
+        self.line_y_offsets = line_y_offsets;
         self.content_height
     }
 
     fn clamp_scroll(&mut self, viewport_width: f32, viewport_height: f32) {
-        if self.follow_cursor {
-            if let Some(cursor) = self.point_for_index(self.cursor_offset()) {
-                let cursor_top = f32::from(cursor.y);
-                if cursor_top < self.scroll_top {
-                    self.scroll_top = cursor_top;
-                } else if cursor_top + f32::from(self.line_height)
-                    > self.scroll_top + viewport_height
-                {
-                    self.scroll_top = cursor_top + f32::from(self.line_height) - viewport_height;
-                }
-                if !self.multiline {
-                    let cursor_left = f32::from(cursor.x);
-                    if cursor_left < self.scroll_left {
-                        self.scroll_left = cursor_left;
-                    } else if cursor_left + 2.0 > self.scroll_left + viewport_width {
-                        self.scroll_left = cursor_left + 2.0 - viewport_width;
-                    }
+        if self.follow_cursor
+            && let Some(cursor) = self.point_for_index(self.cursor_offset())
+        {
+            let cursor_top = f32::from(cursor.y);
+            if cursor_top < self.scroll_top {
+                self.scroll_top = cursor_top;
+            } else if cursor_top + f32::from(self.line_height) > self.scroll_top + viewport_height {
+                self.scroll_top = cursor_top + f32::from(self.line_height) - viewport_height;
+            }
+            if !self.multiline {
+                let cursor_left = f32::from(cursor.x);
+                if cursor_left < self.scroll_left {
+                    self.scroll_left = cursor_left;
+                } else if cursor_left + 2.0 > self.scroll_left + viewport_width {
+                    self.scroll_left = cursor_left + 2.0 - viewport_width;
                 }
             }
         }
@@ -1201,8 +1308,9 @@ impl EntityInputHandler for TextEditorState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
         if self.marked_range.is_none() {
-            self.undo_stack.push(self.snapshot());
-            self.redo_stack.clear();
+            let snapshot = self.snapshot();
+            self.push_undo(snapshot);
+            self.clear_redo_history();
         }
         let replacement = if self.multiline {
             new_text.to_string()
@@ -1238,8 +1346,9 @@ impl EntityInputHandler for TextEditorState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
         if self.marked_range.is_none() {
-            self.undo_stack.push(self.snapshot());
-            self.redo_stack.clear();
+            let snapshot = self.snapshot();
+            self.push_undo(snapshot);
+            self.clear_redo_history();
         }
         let replacement = if self.multiline {
             new_text.to_string()
@@ -1250,13 +1359,13 @@ impl EntityInputHandler for TextEditorState {
             self.content[..range.start].to_owned() + &replacement + &self.content[range.end..];
         self.marked_range =
             (!replacement.is_empty()).then_some(range.start..range.start + replacement.len());
-        self.selected_range = new_selected_range_utf16
-            .as_ref()
-            .map(|selected| {
+        self.selected_range = new_selected_range_utf16.as_ref().map_or_else(
+            || range.start + replacement.len()..range.start + replacement.len(),
+            |selected| {
                 range.start + utf16_offset_to_utf8(&replacement, selected.start)
                     ..range.start + utf16_offset_to_utf8(&replacement, selected.end)
-            })
-            .unwrap_or_else(|| range.start + replacement.len()..range.start + replacement.len());
+            },
+        );
         self.follow_cursor = true;
         self.reset_blink(cx);
         self.emit_change();
@@ -1368,7 +1477,7 @@ impl gpui::Render for TextEditorState {
                 editor.on_key_down(move |event, _window, _cx| {
                     emit_event_full(&key_down_callback, element_id, "keyDown", |payload| {
                         payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
+                        payload.key_char.clone_from(&event.keystroke.key_char);
                         payload.is_held = Some(event.is_held);
                         payload.modifiers = Some(event.keystroke.modifiers.into());
                     });
@@ -1378,7 +1487,7 @@ impl gpui::Render for TextEditorState {
                 editor.on_key_up(move |event, _window, _cx| {
                     emit_event_full(&key_up_callback, element_id, "keyUp", |payload| {
                         payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
+                        payload.key_char.clone_from(&event.keystroke.key_char);
                         payload.modifiers = Some(event.keystroke.modifiers.into());
                     });
                 })
@@ -1450,7 +1559,7 @@ impl gpui::Element for EditorTextElement {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut (),
+        (): &mut (),
         _: &mut Window,
         cx: &mut App,
     ) -> EditorPrepaint {
@@ -1480,7 +1589,7 @@ impl gpui::Element for EditorTextElement {
             input.point_for_index(input.selected_range.start),
             input.point_for_index(input.selected_range.end),
         ) {
-            let color = gpui::rgba(0x7c86ff59);
+            let color = input.selection_color;
             if start.y == end.y {
                 selection.push(fill(
                     Bounds::from_corners(
@@ -1523,7 +1632,7 @@ impl gpui::Element for EditorTextElement {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut (),
+        (): &mut (),
         prepaint: &mut EditorPrepaint,
         window: &mut Window,
         cx: &mut App,
@@ -1572,10 +1681,8 @@ impl gpui::Element for EditorTextElement {
             let caret_shown = self
                 .input
                 .update(cx, |input, cx| input.caret_shown(window, cx));
-            if caret_shown {
-                if let Some(caret) = prepaint.caret.take() {
-                    window.paint_quad(caret);
-                }
+            if caret_shown && let Some(caret) = prepaint.caret.take() {
+                window.paint_quad(caret);
             }
         });
     }

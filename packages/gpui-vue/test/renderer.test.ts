@@ -1,8 +1,8 @@
-import { defineComponent, h, onMounted, ref } from "@vue/runtime-core"
-import { describe, expect, it } from "vitest"
+import { defineComponent, Fragment, h, onMounted, ref } from "@vue/runtime-core"
+import { describe, expect, it, vi } from "vitest"
 
 import {
-  MemoryNativeBridge,
+  MemoryNativeRenderer,
   GpuiCanvas,
   GpuiCode,
   GpuiInput,
@@ -14,16 +14,21 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectScrollDownButton,
   SelectTrigger,
   SelectValue,
+  SseBackend,
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
   AUTOMATION_PROTOCOL_VERSION,
+  automationMethods,
   automationText,
   connectTest,
   createAudioFrames,
   createGpuiRenderer,
+  createSseDecoder,
   createTimeline,
   createWindow,
   decodeSseChunk,
@@ -37,14 +42,101 @@ import {
   useElementRef,
   useGpuiWindow,
   useTextSearch,
+  wrapWithBatching,
   stagger,
   type NativeRenderer,
   type TestAutomationRenderer,
 } from "../src/index.js"
+import { jsx, jsxs } from "../src/jsx-runtime.js"
+
+function countingRendererForTest() {
+  const counts = new Map<string, number>()
+  const count = (operation: string): void => {
+    counts.set(operation, (counts.get(operation) ?? 0) + 1)
+  }
+  const renderer: NativeRenderer = {
+    createElement: () => count("createElement"),
+    destroyElement: () => {
+      count("destroyElement")
+      return []
+    },
+    appendChild: () => count("appendChild"),
+    removeChild: () => count("removeChild"),
+    insertBefore: () => count("insertBefore"),
+    setStyle: () => count("setStyle"),
+    setText: () => count("setText"),
+    setEventListener: () => count("setEventListener"),
+    setRoot: () => count("setRoot"),
+    setCustomProp: () => count("setCustomProp"),
+    commitMutations: () => count("commitMutations"),
+  }
+  return { counts, renderer }
+}
 
 describe("GPUI Vue renderer", () => {
+  it("allows exactly one live Vue root per native renderer", () => {
+    const bridge = new MemoryNativeRenderer()
+    const first = createGpuiRenderer(bridge)
+
+    expect(() => createGpuiRenderer(bridge)).toThrow(/one live Vue root/)
+    first.destroy()
+    first.destroy()
+
+    const second = createGpuiRenderer(bridge)
+    second.flushMutations()
+    expect(bridge.getRetainedElementCount()).toBe(1)
+    second.destroy()
+  })
+
+  it("reclaims removed native text nodes", () => {
+    const bridge = new MemoryNativeRenderer()
+    const host = createGpuiRenderer(bridge)
+    host.render(h("div", null, "hello"), host.root)
+    expect(bridge.getRetainedElementCount()).toBe(3)
+
+    host.render(h("div"), host.root)
+    expect(bridge.getRetainedElementCount()).toBe(2)
+    host.destroy()
+  })
+
+  it("forwards virtual-list pixel anchors including negative offsets", () => {
+    const bridge = new MemoryNativeRenderer()
+    const host = createGpuiRenderer(bridge)
+    host.render(h("virtual-list", { style: { height: 160 } }), host.root)
+    const list = [...bridge.nodes.values()].find((node) => node.type === "virtual-list")
+    if (list === undefined) throw new Error("Expected virtual-list")
+
+    bridge.scrollToItem(list.id, 50, -100)
+    expect(bridge.getListScrollTop(list.id)).toEqual([50, -100, 160])
+    expect(bridge.getListScrollTop(host.root.id)).toBeNull()
+    host.destroy()
+  })
+
+  it("opens hidden or unfocused and can activate later", () => {
+    const bridge = new MemoryNativeRenderer()
+    bridge.init({ focus: false, show: false })
+    expect(bridge.windowActive).toBe(false)
+    expect(bridge.windowVisible).toBe(false)
+
+    bridge.activateWindow()
+    expect(bridge.windowActive).toBe(true)
+    expect(bridge.windowVisible).toBe(true)
+  })
+
+  it("adapts the automatic JSX children and key ABI", () => {
+    const child = jsx("text", { children: "child" })
+    const vnode = jsxs("div", { testId: "jsx", children: ["first", child] }, "stable")
+    expect(vnode.key).toBe("stable")
+    expect(vnode.props?.children).toBeUndefined()
+
+    const bridge = new MemoryNativeRenderer()
+    const host = createGpuiRenderer(bridge)
+    host.render(vnode, host.root)
+    expect(bridge.getAllText()).toEqual(["first", "child"])
+  })
+
   it("maps div and text nodes into the native retained tree", () => {
-    const bridge = new MemoryNativeBridge()
+    const bridge = new MemoryNativeRenderer()
     const host = createGpuiRenderer(bridge)
 
     host.render(
@@ -68,7 +160,7 @@ describe("GPUI Vue renderer", () => {
   })
 
   it("applies text updates and keyed reordering", () => {
-    const bridge = new MemoryNativeBridge()
+    const bridge = new MemoryNativeRenderer()
     const host = createGpuiRenderer(bridge)
 
     host.render(
@@ -88,11 +180,41 @@ describe("GPUI Vue renderer", () => {
     const after = bridge.nodes.get(outerId)?.children ?? []
     expect(after).toEqual([before[1], before[0]])
     const updatedTextId = bridge.nodes.get(after[0] ?? -1)?.children[0]
+    expect(updatedTextId).toBe(bridge.nodes.get(before[1] ?? -1)?.children[0])
     expect(bridge.nodes.get(updatedTextId ?? -1)?.text).toBe("B2")
   })
 
+  it("does not resend structurally unchanged inline motion props", async () => {
+    const updates = ref(0)
+    const boundary = countingRendererForTest()
+    const host = createGpuiRenderer(boundary.renderer)
+    host.mount(
+      defineComponent(
+        () => () => h(MotionDiv, { animate: { opacity: 1 } }, () => String(updates.value)),
+      ),
+    )
+    boundary.counts.clear()
+
+    updates.value += 1
+    await Promise.resolve()
+    host.flushMutations()
+
+    expect(boundary.counts.get("setCustomProp") ?? 0).toBe(0)
+    expect(boundary.counts.get("setText")).toBe(1)
+    host.destroy()
+  })
+
+  it("keeps Vue fragment anchors out of native layout", () => {
+    const bridge = new MemoryNativeRenderer()
+    const host = createGpuiRenderer(bridge)
+    host.render(h(Fragment, null, [h("div", null, "first"), h("div", null, "second")]), host.root)
+
+    expect([...bridge.nodes.values()].filter((node) => node.type === "text")).toHaveLength(2)
+    expect([...bridge.nodes.values()].every((node) => node.text !== "")).toBe(true)
+  })
+
   it("applies mutation batches atomically in the memory renderer", () => {
-    const bridge = new MemoryNativeBridge()
+    const bridge = new MemoryNativeRenderer()
     bridge.createElement(1, "text")
     bridge.setText(1, "before")
 
@@ -108,8 +230,31 @@ describe("GPUI Vue renderer", () => {
     expect(bridge.commitCount).toBe(0)
   })
 
+  it("drops rejected batching waves and reuses proxy method closures", () => {
+    const waves: string[] = []
+    let reject = true
+    const inner = {
+      applyBatch(json: string): number[] {
+        waves.push(json)
+        if (reject) throw new Error("rejected wave")
+        return []
+      },
+    } as unknown as NativeRenderer
+    const renderer = wrapWithBatching(inner)
+    const stableSetText = renderer.setText
+
+    renderer.setText(1, "bad")
+    expect(() => renderer.flushMutations()).toThrow("rejected wave")
+    reject = false
+    renderer.setText(1, "good")
+    renderer.flushMutations()
+
+    expect(renderer.setText).toBe(stableSetText)
+    expect(JSON.parse(waves[1] ?? "null")).toEqual([["setText", 1, "good"]])
+  })
+
   it("rejects elements that do not have a GPUI mapping yet", () => {
-    const host = createGpuiRenderer(new MemoryNativeBridge())
+    const host = createGpuiRenderer(new MemoryNativeRenderer())
     expect(() => host.render(h("span"), host.root)).toThrow("Unsupported GPUI element tag: span")
   })
 
@@ -141,7 +286,7 @@ describe("GPUI Vue renderer", () => {
   })
 
   it("maps auxiliary clicks, visible ranges, and text highlights", () => {
-    const bridge = new MemoryNativeBridge()
+    const bridge = new MemoryNativeRenderer()
     const host = createGpuiRenderer(bridge)
     host.render(
       h(
@@ -202,6 +347,11 @@ describe("GPUI Vue renderer", () => {
 
     expect(panel).toMatchObject({ kind: "element", tag: "div" })
     expect(automationText(snapshot)).toContain("Snapshot text")
+    expect(() =>
+      automationMethods.getTree.result.parse({
+        tree: JSON.parse(root.renderer.getAutomationTree()) as unknown,
+      }),
+    ).not.toThrow()
     root.unmount()
   })
 
@@ -334,7 +484,7 @@ describe("GPUI Vue renderer", () => {
   })
 
   it("controls timeline playback and decoded audio chunks", () => {
-    const renderer = new MemoryNativeBridge()
+    const renderer = new MemoryNativeRenderer()
     renderer.init({ headless: true })
     const timeline = createTimeline(renderer)
     timeline.pause()
@@ -351,11 +501,15 @@ describe("GPUI Vue renderer", () => {
     audio.enqueue(new Float32Array([0, 0.1, 0.2, 0.3]))
     expect(audio.state().queuedFrames).toBe(2)
     expect([...audio.dequeue(1)]).toEqual([0, 0.10000000149011612])
+
+    audio.configure(48_000, 2, 100_000)
+    expect(() => audio.enqueue(new Float32Array(200_000))).not.toThrow()
+    expect(audio.state().queuedFrames).toBe(100_000)
   })
 
   it("keeps independently created windows isolated", () => {
-    const firstRenderer = new MemoryNativeBridge()
-    const secondRenderer = new MemoryNativeBridge()
+    const firstRenderer = new MemoryNativeRenderer()
+    const secondRenderer = new MemoryNativeRenderer()
     const first = createWindow(
       defineComponent(() => () => h("div", null, "First")),
       { renderer: firstRenderer, headless: true },
@@ -380,7 +534,10 @@ describe("GPUI Vue renderer", () => {
           h(
             Select,
             {
-              defaultValue: "one",
+              modelValue: selected.value,
+              "onUpdate:modelValue": (value: string) => {
+                selected.value = value
+              },
               onValueChange: (value: string) => {
                 selected.value = value
               },
@@ -419,6 +576,91 @@ describe("GPUI Vue renderer", () => {
     root.unmount()
   })
 
+  it("supports default v-model, textValue typeahead, and active-option scrolling", async () => {
+    const selected = ref("one")
+    const root = mountGpui(
+      defineComponent(
+        () => () =>
+          h(
+            Select,
+            {
+              modelValue: selected.value,
+              defaultOpen: true,
+              "onUpdate:modelValue": (value: string) => {
+                selected.value = value
+              },
+            },
+            {
+              default: () => [
+                h(SelectTrigger, { testId: "typeahead-trigger" }, () => h(SelectValue)),
+                h(
+                  SelectContent,
+                  { testId: "typeahead-content", style: { maxHeight: 30, overflowY: "scroll" } },
+                  {
+                    default: () => [
+                      h(SelectItem, { value: "one", textValue: "Alpha" }, () => "First"),
+                      h(SelectItem, { value: "two", textValue: "Bravo" }, () => "Second"),
+                      h(SelectScrollDownButton, { testId: "select-scroll-down" }, () => "Down"),
+                    ],
+                  },
+                ),
+              ],
+            },
+          ),
+      ),
+    )
+
+    root.findByTestId("typeahead-content").trigger("keyDown", { key: "b", keyChar: "b" })
+    root.findByTestId("typeahead-content").trigger("keyDown", { key: "enter" })
+    await root.flush()
+    expect(selected.value).toBe("two")
+
+    root.findByTestId("typeahead-trigger").click()
+    await root.flush()
+    root.findByTestId("select-scroll-down").click()
+    root.findByTestId("typeahead-content").trigger("keyDown", { key: "enter" })
+    await root.flush()
+    expect(selected.value).toBe("one")
+    root.unmount()
+  })
+
+  it("updates select registration when an item's value changes", async () => {
+    const itemValue = ref("old")
+    const selected = ref<string>()
+    const root = mountGpui(
+      defineComponent(
+        () => () =>
+          h(
+            Select,
+            {
+              defaultOpen: true,
+              "onUpdate:modelValue": (value: string) => {
+                selected.value = value
+              },
+            },
+            () => [
+              h(SelectTrigger, null, () => h(SelectValue)),
+              h(SelectContent, null, () =>
+                h(
+                  SelectItem,
+                  { value: itemValue.value, testId: "dynamic-option" },
+                  () => "Dynamic",
+                ),
+              ),
+            ],
+          ),
+      ),
+    )
+
+    itemValue.value = "new"
+    await root.flush()
+    root.findByTestId("dynamic-option").click()
+    await root.flush()
+
+    expect(selected.value).toBe("new")
+    root.unmount()
+  })
+
   it("implements Vue-native combobox filtering and selection", async () => {
     const selected = ref<string | string[] | null>(null)
     const root = mountGpui(
@@ -428,7 +670,11 @@ describe("GPUI Vue renderer", () => {
             Combobox,
             {
               items: ["alpha", "beta", "gamma"],
+              modelValue: selected.value,
               defaultOpen: true,
+              "onUpdate:modelValue": (value: string | string[] | null) => {
+                selected.value = value
+              },
               onValueChange: (value: string | string[] | null) => {
                 selected.value = value
               },
@@ -462,6 +708,38 @@ describe("GPUI Vue renderer", () => {
     expect(selected.value).toBe("beta")
     expect(root.findByTestId("combo-input").prop("value")).toBe("beta")
     root.unmount()
+  })
+
+  it("does not enable tooltip skip-delay when a closed trigger is pressed", async () => {
+    vi.useFakeTimers()
+    try {
+      const root = mountGpui(
+        defineComponent(
+          () => () =>
+            h(TooltipProvider, { delayDuration: 100, skipDelayDuration: 500 }, () =>
+              h(Tooltip, null, {
+                default: () => [
+                  h(TooltipTrigger, { testId: "delayed-tooltip-trigger" }, () => "Hover"),
+                  h(TooltipContent, { testId: "delayed-tooltip-content" }, () => "Delayed"),
+                ],
+              }),
+            ),
+        ),
+      )
+
+      const trigger = root.findByTestId("delayed-tooltip-trigger")
+      trigger.trigger("mouseDown")
+      trigger.trigger("mouseEnter")
+      await root.flush()
+      expect(root.queryByTestId("delayed-tooltip-content")).toBeNull()
+
+      vi.advanceTimersByTime(100)
+      await root.flush()
+      expect(root.findByTestId("delayed-tooltip-content").text).toBe("Delayed")
+      root.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("opens Vue-native tooltip content through GPUI hover events", async () => {
@@ -562,8 +840,54 @@ describe("GPUI Vue renderer", () => {
     ])
   })
 
+  it("times out and closes pending SSE automation calls", async () => {
+    const timeoutBackend = new SseBackend(
+      () => {},
+      () => {},
+      undefined,
+      { requestTimeoutMs: 5 },
+    )
+    await expect(
+      timeoutBackend.call("initialize", {
+        protocolVersion: AUTOMATION_PROTOCOL_VERSION,
+        client: "timeout-test",
+      }),
+    ).rejects.toMatchObject({ code: "Timeout" })
+
+    let closeTransport: ((reason?: unknown) => void) | undefined
+    const closeBackend = new SseBackend(
+      () => {},
+      () => {},
+      undefined,
+      {
+        requestTimeoutMs: 1_000,
+        subscribeClose: (listener) => {
+          closeTransport = listener
+        },
+      },
+    )
+    const pending = closeBackend.call("getTree", {})
+    closeTransport?.("EOF")
+    await expect(pending).rejects.toMatchObject({ code: "Closed" })
+  })
+
+  it("recovers the SSE decoder after malformed input", () => {
+    const messages: unknown[] = []
+    const decoder = createSseDecoder((message) => messages.push(message))
+    expect(() => decoder.feed("data: {malformed}\n\n")).toThrow(/Invalid automation JSON/)
+    decoder.reset()
+    decoder.feed(
+      encodeSse({
+        id: 9,
+        method: "initialize",
+        params: { protocolVersion: AUTOMATION_PROTOCOL_VERSION, client: "recovered" },
+      }),
+    )
+    expect(messages).toHaveLength(1)
+  })
+
   it("keeps threaded native windows alive until the renderer closes", async () => {
-    const renderer = new MemoryNativeBridge()
+    const renderer = new MemoryNativeRenderer()
     renderer.init()
     let terminated = false
     const loop = startFrameLoop(renderer, {

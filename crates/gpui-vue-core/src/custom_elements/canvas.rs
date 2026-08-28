@@ -5,6 +5,14 @@
 //! already-tessellated vertices while constructing a frame. There is no JS
 //! callback and no N-API crossing in the paint loop.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "validated canvas numbers and bounded vertex indices narrow to GPUI's f32/u32 path representation"
+)]
+
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use serde::Deserialize;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
@@ -12,7 +20,7 @@ use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 pub struct CanvasFactory;
 
 impl CustomElementFactory for CanvasFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "canvas"
     }
 
@@ -143,9 +151,18 @@ enum PaintItem {
 }
 
 #[derive(Default)]
+struct TranslatedPaintCache {
+    origin: Option<gpui::Point<gpui::Pixels>>,
+    source_revision: u64,
+    items: Arc<[PaintItem]>,
+}
+
+#[derive(Default)]
 pub struct CanvasElement {
     source: serde_json::Value,
-    paint_items: Vec<PaintItem>,
+    paint_items: Arc<[PaintItem]>,
+    source_revision: u64,
+    translated: Arc<Mutex<TranslatedPaintCache>>,
 }
 
 impl CanvasElement {
@@ -154,10 +171,11 @@ impl CanvasElement {
             return;
         }
         self.source = value.clone();
+        self.source_revision = self.source_revision.wrapping_add(1);
         match compile_commands(value) {
-            Ok(items) => self.paint_items = items,
+            Ok(items) => self.paint_items = items.into(),
             Err(error) => {
-                self.paint_items.clear();
+                self.paint_items = Arc::default();
                 log::warn!("Invalid canvas commands: {error}");
             }
         }
@@ -165,6 +183,10 @@ impl CanvasElement {
 }
 
 impl CustomElement for CanvasElement {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "event wiring is a linear declarative table for one retained canvas element"
+    )]
     fn render(
         &mut self,
         ctx: CustomRenderContext,
@@ -174,29 +196,56 @@ impl CustomElement for CanvasElement {
         use gpui::prelude::*;
 
         let paint_items = self.paint_items.clone();
+        let source_revision = self.source_revision;
+        let translated_cache = self.translated.clone();
         let drawing = gpui::canvas(
             |_, _, _| (),
-            move |bounds, _, window, _| {
-                for item in paint_items {
+            move |bounds, (), window, _| {
+                let translated = {
+                    let mut cache = translated_cache.lock();
+                    if cache.origin != Some(bounds.origin)
+                        || cache.source_revision != source_revision
+                    {
+                        cache.items = paint_items
+                            .iter()
+                            .cloned()
+                            .map(|mut item| {
+                                match &mut item {
+                                    PaintItem::Path(path, _) => {
+                                        translate_path(path, bounds.origin);
+                                    }
+                                    PaintItem::Quad {
+                                        bounds: quad_bounds,
+                                        ..
+                                    } => quad_bounds.origin += bounds.origin,
+                                }
+                                item
+                            })
+                            .collect::<Vec<_>>()
+                            .into();
+                        cache.origin = Some(bounds.origin);
+                        cache.source_revision = source_revision;
+                    }
+                    cache.items.clone()
+                };
+                for item in translated.iter() {
                     match item {
-                        PaintItem::Path(mut path, color) => {
-                            translate_path(&mut path, bounds.origin);
-                            window.paint_path(path, color);
+                        PaintItem::Path(path, color) => {
+                            window.paint_path(path.clone(), *color);
                         }
                         PaintItem::Quad {
-                            bounds: mut quad_bounds,
+                            bounds: quad_bounds,
                             radius,
                             fill,
                             stroke,
                             stroke_width,
                         } => {
-                            quad_bounds.origin += bounds.origin;
                             window.paint_quad(gpui::quad(
-                                quad_bounds,
-                                radius,
-                                fill,
-                                stroke_width,
-                                stroke,
+                                *quad_bounds,
+                                *radius,
+                                *fill,
+                                *stroke_width,
+                                *stroke,
                                 gpui::BorderStyle::default(),
                             ));
                         }
@@ -209,15 +258,13 @@ impl CustomElement for CanvasElement {
 
         let element_id = ctx.id;
         let mut container = gpui::div()
-            .id(gpui::SharedString::from(format!(
-                "__gpui_vue_canvas_{element_id}"
-            )))
+            .id(super::custom_element_id("__gpui_vue_canvas", element_id))
             .relative()
             .child(crate::automation::bounds_tracker(element_id, None))
             .child(drawing)
             .children(ctx.children);
         if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
+            container = crate::renderer::apply_interactive_styles(container, style);
         }
         if let Some(handle) = ctx.focus_handle {
             container = container.track_focus(handle);
@@ -344,7 +391,7 @@ impl CustomElement for CanvasElement {
             container = container.on_key_down(move |event, _, _| {
                 crate::renderer::emit_event_full(&callback, element_id, "keyDown", |payload| {
                     payload.key = Some(event.keystroke.key.clone());
-                    payload.key_char = event.keystroke.key_char.clone();
+                    payload.key_char.clone_from(&event.keystroke.key_char);
                     payload.is_held = Some(event.is_held);
                     payload.modifiers = Some(event.keystroke.modifiers.into());
                 });
@@ -355,7 +402,7 @@ impl CustomElement for CanvasElement {
             container = container.on_key_up(move |event, _, _| {
                 crate::renderer::emit_event_full(&callback, element_id, "keyUp", |payload| {
                     payload.key = Some(event.keystroke.key.clone());
-                    payload.key_char = event.keystroke.key_char.clone();
+                    payload.key_char.clone_from(&event.keystroke.key_char);
                     payload.modifiers = Some(event.keystroke.modifiers.into());
                 });
             });
@@ -392,15 +439,17 @@ impl CustomElement for CanvasElement {
     }
 
     fn destroy(&mut self) {
-        self.paint_items.clear();
+        self.paint_items = Arc::default();
+        self.translated.lock().items = Arc::default();
     }
 }
 
 fn mouse_button(button: gpui::MouseButton) -> u32 {
     match button {
+        gpui::MouseButton::Left => 0,
         gpui::MouseButton::Middle => 1,
         gpui::MouseButton::Right => 2,
-        _ => 0,
+        gpui::MouseButton::Navigate(_) => 3,
     }
 }
 
@@ -428,6 +477,10 @@ fn compile_commands(value: serde_json::Value) -> Result<Vec<PaintItem>, String> 
     Ok(items)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "canvas command variants form one exhaustive validation and compilation table"
+)]
 fn compile_command(command: CanvasCommand, items: &mut Vec<PaintItem>) -> Result<(), String> {
     match command {
         CanvasCommand::Path {
@@ -436,7 +489,14 @@ fn compile_command(command: CanvasCommand, items: &mut Vec<PaintItem>) -> Result
             stroke,
             stroke_width,
             dash,
-        } => compile_operations(&operations, fill, stroke, stroke_width, &dash, items),
+        } => compile_operations(
+            &operations,
+            fill.as_deref(),
+            stroke.as_deref(),
+            stroke_width,
+            &dash,
+            items,
+        ),
         CanvasCommand::Rect {
             x,
             y,
@@ -480,7 +540,14 @@ fn compile_command(command: CanvasCommand, items: &mut Vec<PaintItem>) -> Result
                 return Err("canvas circle radius and strokeWidth must be non-negative".to_string());
             }
             let operations = circle_operations(cx, cy, radius);
-            compile_operations(&operations, fill, stroke, stroke_width, &[], items)
+            compile_operations(
+                &operations,
+                fill.as_deref(),
+                stroke.as_deref(),
+                stroke_width,
+                &[],
+                items,
+            )
         }
         CanvasCommand::Line {
             x1,
@@ -496,7 +563,7 @@ fn compile_command(command: CanvasCommand, items: &mut Vec<PaintItem>) -> Result
                 PathOperation::LineTo { x: x2, y: y2 },
             ],
             None,
-            Some(stroke),
+            Some(stroke.as_str()),
             stroke_width,
             &dash,
             items,
@@ -520,15 +587,22 @@ fn compile_command(command: CanvasCommand, items: &mut Vec<PaintItem>) -> Result
             if closed {
                 operations.push(PathOperation::Close);
             }
-            compile_operations(&operations, fill, stroke, stroke_width, &dash, items)
+            compile_operations(
+                &operations,
+                fill.as_deref(),
+                stroke.as_deref(),
+                stroke_width,
+                &dash,
+                items,
+            )
         }
     }
 }
 
 fn compile_operations(
     operations: &[PathOperation],
-    fill: Option<String>,
-    stroke: Option<String>,
+    fill: Option<&str>,
+    stroke: Option<&str>,
     stroke_width: f64,
     dash: &[f64],
     items: &mut Vec<PaintItem>,
@@ -541,14 +615,14 @@ fn compile_operations(
     if stroke_width < 0.0 || dash.iter().any(|value| *value < 0.0) {
         return Err("canvas strokeWidth and dash values must be non-negative".to_string());
     }
-    if let Some(color) = fill.as_deref() {
+    if let Some(color) = fill {
         let mut builder = gpui::PathBuilder::fill();
         apply_operations(&mut builder, operations)?;
         if let Ok(path) = builder.build() {
             items.push(PaintItem::Path(path, parse_color(Some(color), false)?));
         }
     }
-    if let Some(color) = stroke.as_deref() {
+    if let Some(color) = stroke {
         let mut builder = gpui::PathBuilder::stroke(gpui::px(stroke_width as f32));
         if !dash.is_empty() {
             let dash: Vec<_> = dash.iter().map(|value| gpui::px(*value as f32)).collect();
@@ -669,7 +743,7 @@ fn parse_color(value: Option<&str>, transparent_default: bool) -> Result<gpui::H
 fn validate_numbers(values: &[f64]) -> Result<(), String> {
     if values
         .iter()
-        .any(|value| !value.is_finite() || value.abs() > f32::MAX as f64)
+        .any(|value| !value.is_finite() || value.abs() > f64::from(f32::MAX))
     {
         return Err("canvas coordinates must fit finite 32-bit floats".to_string());
     }

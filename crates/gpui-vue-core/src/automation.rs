@@ -4,17 +4,24 @@
 //! clears the map in paint, and GPUI prepaint runs for the whole tree
 //! before any paint. A prepaint recorder would be wiped by the reset.
 //!
-//! TestGpuiRenderer and GpuiRenderer both use this so locators, screenshots,
+//! `TestGpuiRenderer` and `GpuiRenderer` both use this so locators, screenshots,
 //! and clock control do not fork between headless tests and a live window.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "automation coordinates are finite JavaScript numbers narrowed to GPUI's f32 geometry"
+)]
+
+use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    canvas, point, px, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
-    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
+    App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window, canvas,
+    point, px,
 };
 use web_time::Instant;
 
@@ -45,13 +52,19 @@ thread_local! {
 pub fn bounds_frame_reset() -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, _, _| {
+        move |_, (), _, _| {
             BOUNDS.with(|cell| cell.borrow_mut().clear());
         },
     )
     .absolute()
     .w(px(0.0))
     .h(px(0.0))
+}
+
+/// Record a leaf or deferred element's own painted box without introducing a
+/// wrapper that would change its intrinsic sizing or flex behavior.
+pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
+    el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
@@ -123,24 +136,25 @@ impl AutomationClock {
     }
 
     pub fn now(&self) -> Instant {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         inner.origin + elapsed(&inner)
     }
 
+    #[cfg(test)]
     pub fn now_ms(&self) -> f64 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         elapsed(&inner).as_secs_f64() * 1000.0
     }
 
     pub fn pause(&self) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = elapsed(&inner);
         inner.playing = false;
         inner.anchor_elapsed.as_secs_f64() * 1000.0
     }
 
     pub fn set_ms(&self, now_ms: f64) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = duration_ms(now_ms);
         inner.anchor_real = Instant::now();
         inner.playing = false;
@@ -148,14 +162,14 @@ impl AutomationClock {
     }
 
     pub fn seek_ms(&self, now_ms: f64) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = duration_ms(now_ms);
         inner.anchor_real = Instant::now();
         inner.anchor_elapsed.as_secs_f64() * 1000.0
     }
 
     pub fn fast_forward_ms(&self, delta_ms: f64) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = elapsed(&inner).saturating_add(duration_ms(delta_ms));
         inner.anchor_real = Instant::now();
         inner.playing = false;
@@ -163,7 +177,7 @@ impl AutomationClock {
     }
 
     pub fn resume(&self) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = elapsed(&inner);
         inner.anchor_real = Instant::now();
         inner.playing = true;
@@ -171,7 +185,7 @@ impl AutomationClock {
     }
 
     pub fn set_playback_rate(&self, playback_rate: f64) -> f64 {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.anchor_elapsed = elapsed(&inner);
         inner.anchor_real = Instant::now();
         inner.playback_rate = playback_rate;
@@ -179,7 +193,7 @@ impl AutomationClock {
     }
 
     pub fn snapshot(&self) -> ClockSnapshot {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         ClockSnapshot {
             current_time_ms: elapsed(&inner).as_secs_f64() * 1000.0,
             playback_rate: inner.playback_rate,
@@ -188,7 +202,7 @@ impl AutomationClock {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.inner.lock().unwrap().playing
+        self.inner.lock().playing
     }
 }
 
@@ -399,6 +413,10 @@ pub fn dispatch_scroll_wheel(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "automation-clock tests assert exact deterministic state transitions"
+)]
 mod tests {
     use super::*;
 

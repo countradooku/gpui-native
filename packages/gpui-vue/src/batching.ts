@@ -28,12 +28,17 @@ export interface BatchingRenderer extends NativeRenderer {
 export function wrapWithBatching(inner: NativeRenderer): BatchingRenderer {
   let queue: Mutation[] = []
   let scheduled = false
+  const methodCache = new Map<PropertyKey, unknown>()
 
   const flushMutations = (): NativeNodeId[] => {
     scheduled = false
     if (queue.length === 0) return []
 
+    // Detach the pending wave before crossing the native boundary. A rejected
+    // batch must never remain queued: replaying it on every later flush both
+    // poisons the renderer and widens the JS/native divergence.
     const pending = queue
+    queue = []
     let destroyed: NativeNodeId[] = []
     if (typeof inner.applyBatch === "function") {
       destroyed = inner.applyBatch(JSON.stringify(pending))
@@ -43,7 +48,6 @@ export function wrapWithBatching(inner: NativeRenderer): BatchingRenderer {
       }
       inner.commitMutations()
     }
-    queue = []
     return destroyed
   }
 
@@ -65,27 +69,36 @@ export function wrapWithBatching(inner: NativeRenderer): BatchingRenderer {
         return flushMutations
       }
 
+      const cached = methodCache.get(property)
+      if (cached !== undefined) return cached
+
       if (property === "destroyElement") {
-        return (id: NativeNodeId): NativeNodeId[] => {
+        const destroy = (id: NativeNodeId): NativeNodeId[] => {
           enqueue("destroyElement", [id])
           return []
         }
+        methodCache.set(property, destroy)
+        return destroy
       }
 
       if (typeof property === "string" && BATCHED_METHODS.has(property)) {
-        return (...args: MutationArgument[]): void => {
+        const mutate = (...args: MutationArgument[]): void => {
           const operation = property === "setCustomProp" ? "setCustomPropValue" : property
           enqueue(operation, args)
         }
+        methodCache.set(property, mutate)
+        return mutate
       }
 
       const value: unknown = Reflect.get(target, property, receiver)
       if (typeof value !== "function") return value
 
-      return (...args: unknown[]): unknown => {
+      const invoke = (...args: unknown[]): unknown => {
         flushMutations()
         return Reflect.apply(value, target, args)
       }
+      methodCache.set(property, invoke)
+      return invoke
     },
   }) as BatchingRenderer
 }

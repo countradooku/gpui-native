@@ -7,7 +7,6 @@ type HandlerMap = Map<NativeNodeId, Map<string, GpuiEventHandlerValue>>
 
 const fallbackEventHandlers: HandlerMap = new Map()
 const rendererEventHandlers = new WeakMap<object, HandlerMap>()
-const allRendererHandlerMaps = new Set<HandlerMap>()
 
 export const EVENT_PROPS = [
   ["onToggleFile", "toggleFile"],
@@ -74,6 +73,15 @@ export function handleGpuiEvent(payload: EventPayload, renderer?: NativeRenderer
   }
 }
 
+export function subscribeRendererEvent(
+  renderer: NativeRenderer,
+  eventType: string,
+  handler: GpuiEventHandler,
+): () => void {
+  registerEventHandler(0, eventType, handler, renderer)
+  return () => unregisterEventHandler(0, eventType, renderer)
+}
+
 export function registerEventHandler(
   elementId: NativeNodeId,
   eventType: string,
@@ -108,15 +116,12 @@ export function unregisterEventHandlers(elementId: NativeNodeId, renderer?: Nati
 export function clearEventHandlers(renderer?: NativeRenderer): void {
   if (renderer === undefined) {
     fallbackEventHandlers.clear()
-    for (const handlers of allRendererHandlerMaps) handlers.clear()
-    allRendererHandlerMaps.clear()
     return
   }
   const key = rendererKey(renderer)
   const handlers = rendererEventHandlers.get(key)
   if (handlers === undefined) return
   handlers.clear()
-  allRendererHandlerMaps.delete(handlers)
   rendererEventHandlers.delete(key)
 }
 
@@ -127,7 +132,6 @@ function handlersFor(renderer?: NativeRenderer): HandlerMap {
   if (handlers === undefined) {
     handlers = new Map()
     rendererEventHandlers.set(key, handlers)
-    allRendererHandlerMaps.add(handlers)
   }
   return handlers
 }

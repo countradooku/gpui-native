@@ -1,6 +1,6 @@
 //! Cross-element text selection state.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/markdown/selection.rs`.
 //!
 //! GPUI has no built-in selection for plain text. Zed's markdown selects
@@ -22,6 +22,8 @@
 //! selection.
 
 use std::ops::Range;
+
+use unicode_segmentation::UnicodeSegmentation;
 
 /// One element's slice of the selection, in document order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,15 +84,18 @@ impl SelectionState {
         self.spans.clear();
     }
 
-    /// Turn a pending press into a live drag. True when this call started it.
-    pub fn promote_pending_for(&mut self, key: &str) -> bool {
-        if !self.pending || self.anchor_key != key {
+    pub fn promote_pending(&mut self) -> bool {
+        if !self.pending {
             return false;
         }
         self.pending = false;
         self.dragging = true;
         self.active = true;
         true
+    }
+
+    pub fn active_drag(&self) -> Option<(String, usize)> {
+        (self.active && self.dragging).then(|| (self.anchor_key.clone(), self.anchor_ix))
     }
 
     pub fn cancel_pending(&mut self) {
@@ -118,11 +123,6 @@ impl SelectionState {
         }];
     }
 
-    /// The live drag's anchor offset, if `key` owns the drag.
-    pub fn drag_anchor(&self, key: &str) -> Option<usize> {
-        (self.active && self.dragging && self.anchor_key == key).then_some(self.anchor_ix)
-    }
-
     /// Replace the resolved spans. Returns true when they changed.
     pub fn update_spans(&mut self, spans: Vec<Span>) -> bool {
         if !self.active || self.spans == spans {
@@ -143,6 +143,11 @@ impl SelectionState {
             return None;
         }
         Some(join_spans(&self.spans))
+    }
+
+    pub fn end_active_drag(&mut self) -> Option<String> {
+        let key = self.anchor_key.clone();
+        self.end_drag(&key)
     }
 
     pub fn clear(&mut self) {
@@ -240,29 +245,23 @@ fn join_spans(spans: &[Span]) -> String {
 /// or the single non-space char under the cursor, or empty at spaces.
 pub fn word_range(text: &str, ix: usize) -> Range<usize> {
     let ix = clamp_boundary(text, ix);
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
-    let before = text[..ix].chars().next_back();
-    let at = text[ix..].chars().next();
-    if !at.is_some_and(is_word) && !before.is_some_and(is_word) {
-        return match at {
-            Some(c) if !c.is_whitespace() => ix..ix + c.len_utf8(),
-            _ => ix..ix,
-        };
+    for (start, segment) in text.split_word_bound_indices() {
+        let end = start + segment.len();
+        if start <= ix
+            && ix <= end
+            && segment
+                .chars()
+                .any(|character| character.is_alphanumeric() || character == '_')
+        {
+            return start..end;
+        }
     }
-    let start = text[..ix]
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| is_word(*c))
-        .last()
-        .map(|(i, _)| i)
-        .unwrap_or(ix);
-    let end = text[ix..]
-        .char_indices()
-        .take_while(|(_, c)| is_word(*c))
-        .last()
-        .map(|(i, c)| ix + i + c.len_utf8())
-        .unwrap_or(ix);
-    start..end
+    text[ix..]
+        .grapheme_indices(true)
+        .next()
+        .filter(|(_, grapheme)| !grapheme.chars().all(char::is_whitespace))
+        .map(|(_, grapheme)| ix..ix + grapheme.len())
+        .unwrap_or(ix..ix)
 }
 
 #[cfg(test)]
@@ -313,9 +312,8 @@ mod tests {
     fn drag_lifecycle_and_copy_joins() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 6);
-        assert!(sel.promote_pending_for("p1"));
-        assert_eq!(sel.drag_anchor("p1"), Some(6));
-        assert_eq!(sel.drag_anchor("p2"), None);
+        assert!(sel.promote_pending());
+        assert_eq!(sel.active_drag(), Some(("p1".to_string(), 6)));
         let spans = resolve_spans(&elems(), (0, 6), (1, 6));
         assert!(sel.update_spans(spans.clone()));
         assert!(!sel.update_spans(spans));
@@ -332,7 +330,7 @@ mod tests {
     fn empty_click_clears_on_release() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 3);
-        assert!(sel.promote_pending_for("p1"));
+        assert!(sel.promote_pending());
         assert_eq!(sel.end_drag("p1"), None);
         assert_eq!(sel.selected_text(), None);
     }
@@ -343,20 +341,19 @@ mod tests {
         sel.arm("p1", 3);
         assert!(sel.is_pending());
         assert!(!sel.is_active());
-        assert_eq!(sel.drag_anchor("p1"), None);
+        assert_eq!(sel.active_drag(), None);
         sel.cancel_pending();
         assert!(!sel.is_pending());
         assert_eq!(sel.selected_text(), None);
     }
 
     #[test]
-    fn pending_press_promotes_on_drag() {
+    fn pending_press_promotes_only_once() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 6);
-        assert!(!sel.promote_pending_for("p2"));
-        assert!(sel.promote_pending_for("p1"));
-        assert!(!sel.promote_pending_for("p1"));
-        assert_eq!(sel.drag_anchor("p1"), Some(6));
+        assert!(sel.promote_pending());
+        assert!(!sel.promote_pending());
+        assert_eq!(sel.active_drag(), Some(("p1".to_string(), 6)));
         let spans = resolve_spans(&elems(), (0, 6), (0, 15));
         assert!(sel.update_spans(spans));
         assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph"));
@@ -381,6 +378,8 @@ mod tests {
         assert_eq!(word_range(t, 3), 0..3);
         let u = "héllo wörld";
         assert_eq!(&u[word_range(u, 2)], "héllo");
+        let combining = "cafe\u{301} noir";
+        assert_eq!(&combining[word_range(combining, 2)], "cafe\u{301}");
     }
 
     /// A stale index past a shrunk element's text must clamp, not panic.
@@ -396,7 +395,7 @@ mod tests {
     fn copy_joins_one_group_without_newlines() {
         let mut sel = SelectionState::default();
         sel.arm("2:0", 0);
-        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.promote_pending());
         let spans = resolve_spans(&interpolated(), (0, 0), (2, 1));
         assert!(sel.update_spans(spans));
         assert_eq!(sel.selected_text().as_deref(), Some("Hello Tommy!"));
@@ -411,7 +410,7 @@ mod tests {
         ];
         let mut sel = SelectionState::default();
         sel.arm("2:0", 0);
-        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.promote_pending());
         assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (2, 11))));
         assert_eq!(
             sel.selected_text().as_deref(),
@@ -429,7 +428,7 @@ mod tests {
         ];
         let mut sel = SelectionState::default();
         sel.arm("7:0", 0);
-        assert!(sel.promote_pending_for("7:0"));
+        assert!(sel.promote_pending());
         assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (1, 10))));
         assert_eq!(
             sel.selected_text().as_deref(),

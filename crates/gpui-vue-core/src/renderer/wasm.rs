@@ -75,6 +75,11 @@ impl WebGpuiRenderer {
         self.inner.requires_tick()
     }
 
+    #[wasm_bindgen(js_name = supportsWindowEvents)]
+    pub fn supports_window_events(&self) -> bool {
+        self.inner.supports_window_events()
+    }
+
     pub fn tick(&self) -> Result<bool, JsValue> {
         self.inner.tick().map_err(js_error)
     }
@@ -93,6 +98,11 @@ impl WebGpuiRenderer {
     pub fn get_window_insets_json(&self) -> Result<String, JsValue> {
         let insets: WindowInsets = self.inner.get_window_insets().map_err(js_error)?;
         json(&insets)
+    }
+
+    #[wasm_bindgen(js_name = activateWindow)]
+    pub fn activate_window(&self) -> Result<(), JsValue> {
+        self.inner.activate_window().map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = setWindowTitle)]
@@ -125,10 +135,25 @@ impl WebGpuiRenderer {
     }
 
     #[wasm_bindgen(js_name = scrollToItem)]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<(), JsValue> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<(), JsValue> {
         self.inner
-            .scroll_to_item(element_id, index)
+            .scroll_to_item(element_id, index, offset_in_item)
             .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = getListScrollTopJson)]
+    pub fn get_list_scroll_top_json(&self, element_id: f64) -> Result<String, JsValue> {
+        json(
+            &self
+                .inner
+                .get_list_scroll_top(element_id)
+                .map_err(js_error)?,
+        )
     }
 
     #[wasm_bindgen(js_name = getScrollOffsetJson)]

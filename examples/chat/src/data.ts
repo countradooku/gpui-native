@@ -171,14 +171,16 @@ const gutterDiff = [
   " }",
 ].join("\n")
 
-export type Turn =
+type TurnContent =
   | { kind: "user"; text: string }
   | { kind: "fold"; duration: string }
   | { kind: "markdown"; source: string }
   | { kind: "code"; language: string; source: string }
   | { kind: "diff"; patch: string }
 
-export const baseTurns: Turn[] = [
+export type Turn = TurnContent & { id: string }
+
+const turnTemplates: TurnContent[] = [
   { kind: "user", text: "give me a quick overview" },
   { kind: "fold", duration: "Worked for 10 seconds" },
   { kind: "markdown", source: overview },
@@ -211,7 +213,14 @@ export const baseTurns: Turn[] = [
   },
 ]
 
+export const baseTurns: Turn[] = turnTemplates.map((turn, index) => ({
+  ...turn,
+  id: `base-${index}`,
+}))
+
 export function expandTurns(count: number): Turn[] {
-  if (count <= baseTurns.length) return baseTurns.slice(0, count)
-  return Array.from({ length: count }, (_, index) => baseTurns[index % baseTurns.length]!)
+  return Array.from({ length: count }, (_, index) => ({
+    ...turnTemplates[index % turnTemplates.length]!,
+    id: `turn-${index}`,
+  }))
 }

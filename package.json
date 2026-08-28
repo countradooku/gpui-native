@@ -11,30 +11,42 @@
     "type": "git",
     "url": "git+https://github.com/countradooku/gpui-vue.git"
   },
-  "workspaces": [
-    "packages/*",
-    "examples/*"
-  ],
+  "workspaces": {
+    "packages": [
+      "packages/*",
+      "examples/*"
+    ],
+    "catalog": {
+      "@types/node": "^24.0.0",
+      "@vitejs/plugin-vue": "^6.0.3",
+      "typescript": "^5.9.3",
+      "vite": "^8.2.2",
+      "vue": "^3.5.41",
+      "vue-tsc": "^3.2.0"
+    }
+  },
   "scripts": {
     "build": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build",
     "build:binaries": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build:binary",
     "build:native": "bun --filter @gpui-vue/native build",
     "build:pages": "bun run scripts/build-pages.mts",
-    "check": "bun run typecheck && bun run lint && bun run format:check && cargo check --workspace --all-features",
-    "format": "oxfmt --write packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples web scripts .github AGENTS.md README.md package.json vite.examples.config.mts vite.pages.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
-    "format:check": "oxfmt --check packages/gpui-vue/src packages/gpui-vue/test packages/gpui-vue/package.json packages/gpui-vue-native/package.json examples web scripts .github AGENTS.md README.md package.json vite.examples.config.mts vite.pages.config.mts rust-toolchain.toml Cargo.toml crates/gpui-vue-core/Cargo.toml .cargo/config.toml .oxfmtrc.json .oxlintrc.json",
+    "bench": "bun run scripts/bench-hot-paths.mts && cargo run --release -p gpui-vue-core --example bench_hot_paths",
+    "check": "bun run typecheck && bun run lint && bun run format:check && cargo fmt --all -- --check && cargo clippy --workspace --all-features --all-targets -- -D warnings && cargo check --workspace --all-features",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "lint": "oxlint --vue-plugin --deny-warnings packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
     "lint:fix": "oxlint --vue-plugin --fix packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
-    "test": "bun --filter gpui-vue test && cargo test --workspace",
+    "setup:wasm": "bun run scripts/install-wasm-bindgen.mts",
+    "test": "bun --filter gpui-vue test && cargo test --workspace --all-features",
     "test:native": "bun run scripts/native-smoke.mts",
-    "typecheck": "bun --filter gpui-vue typecheck && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' typecheck && bun packages/gpui-vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
+    "typecheck": "bun --filter gpui-vue typecheck && bun --filter '@gpui-vue/example-*' typecheck && bun packages/gpui-vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.3",
+    "@vitejs/plugin-vue": "catalog:",
     "oxc-transform": "^0.146.0",
     "oxfmt": "^0.64.0",
     "oxlint": "^1.79.0",
-    "vite": "^8.2.2"
+    "vite": "catalog:"
   },
   "packageManager": "bun@1.4.0"
 }

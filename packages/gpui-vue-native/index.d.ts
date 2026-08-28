@@ -2,7 +2,7 @@
 /* eslint-disable */
 /** The main GPUI renderer exposed to Node.js. */
 export declare class GpuiRenderer {
-  constructor(eventCallback?: NativeEventCallback | undefined | null)
+  constructor(eventCallback?: (error: Error | null, event: EventPayload | null) => void)
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
   createElement(id: number, elementType: string): void
@@ -35,17 +35,19 @@ export declare class GpuiRenderer {
    * the first element is the operation name (string) and remaining elements
    * are the arguments:
    *
-   *   ["createElement",    id, "type"]
-   *   ["destroyElement",   id]
-   *   ["appendChild",      parentId, childId]
-   *   ["removeChild",      parentId, childId]
-   *   ["insertBefore",     parentId, childId, beforeId]
-   *   ["setStyle",         id, { ...style } | "{styleJson}"]
-   *   ["setText",          id, "content"]
-   *   ["setEventListener", id, "eventType", true|false]
-   *   ["setRoot",          id]
-   *   ["setCustomProp",      id, "key", value | "{valueJson}"]
-   *   ["setCustomPropValue", id, "key", value]
+   * ```text
+   * ["createElement",    id, "type"]
+   * ["destroyElement",   id]
+   * ["appendChild",      parentId, childId]
+   * ["removeChild",      parentId, childId]
+   * ["insertBefore",     parentId, childId, beforeId]
+   * ["setStyle",         id, { ...style } | "{styleJson}"]
+   * ["setText",          id, "content"]
+   * ["setEventListener", id, "eventType", true|false]
+   * ["setRoot",          id]
+   * ["setCustomProp",      id, "key", value | "{valueJson}"]
+   * ["setCustomPropValue", id, "key", value]
+   * ```
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
    * Acquires the tree mutex ONCE for the entire batch.
@@ -54,8 +56,13 @@ export declare class GpuiRenderer {
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /** Whether JavaScript must drive the native event loop with `tick()`. */
   requiresTick(): boolean
+  /**
+   * First-party renderers emit window lifecycle events through the normal
+   * callback, allowing JS to avoid timer-based liveness and size polling.
+   */
+  supportsWindowEvents(): boolean
   /**
    * The paintable size of the window in logical pixels, excluding any
    * platform title bar. This used to answer a hardcoded 800x600, so anything
@@ -79,6 +86,11 @@ export declare class GpuiRenderer {
   resetDebugFrameOverlayStats(): void
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  /**
+   * Bring the window forward and focus it. This also reveals a window opened
+   * with `show: false`.
+   */
+  activateWindow(): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -91,8 +103,16 @@ export declare class GpuiRenderer {
    * x and y are negative pixel values (scroll down = more negative y).
    */
   scrollTo(elementId: number, x: number, y: number): void
-  /** Scroll a child into view by its index in the children list. */
-  scrollToItem(elementId: number, index: number): void
+  /**
+   * Scroll a child into view by index, optionally preserving a pixel offset
+   * inside that item. Negative offsets are valid for prepend restoration.
+   */
+  scrollToItem(elementId: number, index: number, offsetInItem?: number | undefined | null): void
+  /**
+   * Return `[itemIndex, offsetInItemPx, viewportHeightPx]` for a virtual
+   * list, or null for an ordinary element.
+   */
+  getListScrollTop(elementId: number): Array<number> | null
   /**
    * Get the current scroll offset of a scrollable element.
    * Returns [x, y] or null if the element has no scroll handle.
@@ -181,7 +201,7 @@ export interface EventPayload {
   /** Numeric element ID (matches the ID assigned in JS via createElement). */
   elementId: number
   /**
-   * Event type string — matches the key used in EVENT_PROPS on the JS side.
+   * Event type string — matches the key used in `EVENT_PROPS` on the JS side.
    * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
    */
   eventType: string
@@ -189,6 +209,10 @@ export interface EventPayload {
   x?: number
   /** Mouse Y position in window coordinates (pixels). */
   y?: number
+  /** Native viewport width. Populated for `windowResize`. */
+  width?: number
+  /** Native viewport height. Populated for `windowResize`. */
+  height?: number
   /**
    * Which mouse button: 0=left, 1=middle, 2=right.
    * Populated for: mouseDown, mouseUp, click, mouseDownOutside, contextMenu.
@@ -201,7 +225,7 @@ export interface EventPayload {
   clickCount?: number
   /**
    * Whether this is a right-click (convenience for click events).
-   * true when button==2 or ClickEvent::is_right_click().
+   * true when button==2 or `ClickEvent::is_right_click()`.
    */
   isRightClick?: boolean
   /**
@@ -343,6 +367,13 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /** Give the window focus when it opens. Ignored by GPUI on Linux. */
+  focus?: boolean
+  /**
+   * Show the window when it opens. Call `activateWindow()` to reveal it.
+   * Ignored by GPUI on Linux.
+   */
+  show?: boolean
 }
 
 export interface WindowSize {

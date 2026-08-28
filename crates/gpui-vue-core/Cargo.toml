@@ -1,7 +1,7 @@
 [package]
 name = "gpui-vue-core"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "Full native GPUI renderer and component runtime for gpui-vue"
 license = "Apache-2.0"
 repository = "https://github.com/countradooku/gpui-vue"
@@ -10,11 +10,11 @@ repository = "https://github.com/countradooku/gpui-vue"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-anyhow = "1"
+base64 = "0.22"
 csscolorparser = "0.8.3"
 env_logger = "0.11"
 futures = "0.3"
-gpui = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a51363634ef984cf2e7139224f49ac2", default-features = false, features = [
+gpui = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
   "profiler",
 ] }
 log = "0.4"
@@ -28,11 +28,11 @@ unicode-segmentation = "1"
 web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-gpui = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a51363634ef984cf2e7139224f49ac2", default-features = false, features = [
+gpui = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
   "font-kit",
   "profiler",
 ] }
-gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a51363634ef984cf2e7139224f49ac2", default-features = false, features = [
+gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
   "font-kit",
   "wayland",
   "x11",
@@ -47,15 +47,13 @@ syntect = { version = "5.3", default-features = false, features = ["regex-fancy"
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a51363634ef984cf2e7139224f49ac2", default-features = false }
+gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false }
 js-sys = "0.3"
 wasm-bindgen = "=0.2.127"
 web-sys = { version = "0.3", features = ["Navigator", "Window"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "=0.24.0"
-core-text = "=21.0.0"
-gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a51363634ef984cf2e7139224f49ac2", default-features = false, features = [
+gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
   "font-kit",
 ] }
 
@@ -63,7 +61,6 @@ gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "788c72f18a513
 default = []
 # Compatibility feature names used by the npm build scripts. The full native
 # parity engine is always compiled; these names keep the CLI stable.
-gpui-renderer = []
 napi-bindings = []
 native-window = []
 test-support = [
@@ -75,9 +72,6 @@ test-support = [
 
 [build-dependencies]
 napi-build = "2"
-
-[dev-dependencies]
-rmp-serde = "1.3"
 
 [lints]
 workspace = true

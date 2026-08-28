@@ -1,6 +1,5 @@
 import { nextTick, type App, type Component } from "@vue/runtime-core"
 
-import { GpuiRendererKey } from "./context.js"
 import { handleGpuiEvent } from "./events.js"
 import { MemoryNativeRenderer } from "./native.js"
 import type { GpuiElement, GpuiNode } from "./nodes.js"
@@ -67,10 +66,7 @@ export interface GpuiTestRoot {
 export function mountGpui(component: Component, props?: Record<string, unknown>): GpuiTestRoot {
   const renderer = new MemoryNativeRenderer()
   const host = createGpuiRenderer(renderer)
-  const app = host.createApp(component, props)
-  app.provide(GpuiRendererKey, host.renderer)
-  app.mount(host.root)
-  host.flushMutations()
+  const app = host.mount(component, props)
 
   const findAll = (
     predicate: (element: GpuiTestElement) => boolean = () => true,

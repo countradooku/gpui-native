@@ -1,6 +1,6 @@
 //! Bounded cache for neutral syntax documents.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/syntax_cache.rs`.
 //!
 //! Colours and gpui runs deliberately stay OUTSIDE this cache. A theme change
@@ -10,10 +10,14 @@
 //! GPUIX is immediate-mode: `<code>` re-renders on every frame. Without this
 //! cache a 200-line snippet is reparsed 60 times a second.
 
+use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
-use super::{highlight, HighlightRequest, HighlightedDocument, LanguageId};
+use super::{
+    DEFAULT_MAX_SOURCE_BYTES, HighlightError, HighlightRequest, HighlightedDocument, LanguageId,
+    highlight,
+};
 
 /// Bump when the scope map or Syntect syntax dump changes, so stale entries
 /// from a previous build of the same process cannot be served.
@@ -52,7 +56,14 @@ fn hash64(source: &str) -> u64 {
 
 struct CachedDocument {
     retained_bytes: usize,
-    document: Arc<HighlightedDocument>,
+    /// `None` is a cached span-limit rejection. It avoids reparsing an input
+    /// that deterministically renders as plain text.
+    document: Option<Arc<HighlightedDocument>>,
+}
+
+enum CacheLookup {
+    Miss,
+    Hit(Option<Arc<HighlightedDocument>>),
 }
 
 #[derive(Default)]
@@ -60,27 +71,15 @@ pub struct SyntaxCache {
     documents: HashMap<DocumentKey, CachedDocument>,
     recency: VecDeque<DocumentKey>,
     retained_bytes: usize,
-    hits: u64,
-    misses: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub documents: usize,
-    pub retained_bytes: usize,
 }
 
 impl SyntaxCache {
-    fn get(&mut self, key: &DocumentKey) -> Option<Arc<HighlightedDocument>> {
+    fn get(&mut self, key: &DocumentKey) -> CacheLookup {
         let Some(document) = self.documents.get(key).map(|entry| entry.document.clone()) else {
-            self.misses += 1;
-            return None;
+            return CacheLookup::Miss;
         };
-        self.hits += 1;
         self.touch(*key);
-        Some(document)
+        CacheLookup::Hit(document)
     }
 
     fn insert(&mut self, key: DocumentKey, document: Arc<HighlightedDocument>) {
@@ -97,7 +96,7 @@ impl SyntaxCache {
             key,
             CachedDocument {
                 retained_bytes,
-                document,
+                document: Some(document),
             },
         );
         self.touch(key);
@@ -111,23 +110,25 @@ impl SyntaxCache {
         }
     }
 
+    fn insert_plain(&mut self, key: DocumentKey) {
+        self.documents.insert(
+            key,
+            CachedDocument {
+                retained_bytes: 0,
+                document: None,
+            },
+        );
+        self.touch(key);
+    }
+
     fn touch(&mut self, key: DocumentKey) {
         self.recency.retain(|candidate| *candidate != key);
         self.recency.push_back(key);
     }
-
-    pub fn stats(&self) -> CacheStats {
-        CacheStats {
-            hits: self.hits,
-            misses: self.misses,
-            documents: self.documents.len(),
-            retained_bytes: self.retained_bytes,
-        }
-    }
 }
 
 fn estimated_bytes(document: &HighlightedDocument) -> usize {
-    let spans: usize = document.lines.iter().map(|line| line.len()).sum();
+    let spans: usize = document.lines.iter().map(std::vec::Vec::len).sum();
     std::mem::size_of::<HighlightedDocument>()
         + document.lines.len() * std::mem::size_of::<Vec<super::HighlightSpan>>()
         + spans * std::mem::size_of::<super::HighlightSpan>()
@@ -141,42 +142,39 @@ fn global() -> &'static Mutex<SyntaxCache> {
 /// Highlight through the process-wide cache.
 ///
 /// Returns `None` when the language is unknown or the source is too large,
-/// which callers render as plain text. Negative results are NOT cached: they
-/// are cheap to recompute and caching them would keep unparseable megabytes
-/// keyed forever.
+/// which callers render as plain text. Span-limit failures are cached because
+/// retrying the same expensive parse every frame is worse than the compact key.
 pub fn highlight_cached(
     source: &str,
     path: Option<&str>,
     fence_tag: Option<&str>,
 ) -> Option<Arc<HighlightedDocument>> {
+    // Reject before language detection and hashing. Huge minified sources are
+    // common, and their plain-text outcome needs no cache key.
+    if source.len() > DEFAULT_MAX_SOURCE_BYTES {
+        return None;
+    }
     let language = super::detect_language(path, fence_tag, source.lines().next())?;
     let key = DocumentKey::new(language, source);
-    if let Some(cached) = global().lock().ok()?.get(&key) {
-        return Some(cached);
+    match global().lock().get(&key) {
+        CacheLookup::Hit(document) => return document,
+        CacheLookup::Miss => {}
     }
-    let document = highlight(HighlightRequest {
+    let document = match highlight(HighlightRequest {
         source,
         path,
         fence_tag,
-    })
-    .ok()?;
+    }) {
+        Ok(document) => document,
+        Err(HighlightError::TooManySpans) => {
+            global().lock().insert_plain(key);
+            return None;
+        }
+        Err(_) => return None,
+    };
     let document = Arc::new(document);
-    if let Ok(mut cache) = global().lock() {
-        cache.insert(key, document.clone());
-    }
+    global().lock().insert(key, document.clone());
     Some(document)
-}
-
-pub fn stats() -> CacheStats {
-    global()
-        .lock()
-        .map(|cache| cache.stats())
-        .unwrap_or(CacheStats {
-            hits: 0,
-            misses: 0,
-            documents: 0,
-            retained_bytes: 0,
-        })
 }
 
 #[cfg(test)]
@@ -185,12 +183,10 @@ mod tests {
 
     #[test]
     fn second_lookup_hits_the_cache() {
-        let before = stats().hits;
         let source = "fn cache_probe() -> u32 { 7 }";
         let a = highlight_cached(source, Some("probe.rs"), None).unwrap();
         let b = highlight_cached(source, Some("probe.rs"), None).unwrap();
         assert!(Arc::ptr_eq(&a, &b), "the same Arc must be served twice");
-        assert!(stats().hits > before);
     }
 
     #[test]
@@ -221,6 +217,15 @@ mod tests {
                 Arc::new(document),
             );
         }
-        assert!(cache.stats().documents <= MAX_DOCUMENTS);
+        assert!(cache.documents.len() <= MAX_DOCUMENTS);
+        assert!(cache.retained_bytes <= MAX_RETAINED_BYTES);
+    }
+
+    #[test]
+    fn plain_fallbacks_are_cached() {
+        let mut cache = SyntaxCache::default();
+        let key = DocumentKey::new(LanguageId::Rust, "fallback");
+        cache.insert_plain(key);
+        assert!(matches!(cache.get(&key), CacheLookup::Hit(None)));
     }
 }

@@ -55,7 +55,7 @@ function rowStyle(state: SelectItemState): StyleDesc {
 </script>
 
 <template>
-  <Select v-model:value="model" :style="{ flexShrink: 0 }">
+  <Select v-model="model" :style="{ flexShrink: 0 }">
     <div :style="{ position: 'relative', display: 'flex' }">
       <SelectTrigger
         :style="{

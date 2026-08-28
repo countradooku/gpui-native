@@ -11,6 +11,7 @@ pub(crate) fn parse_color_rgba(value: &str) -> Option<gpui::Rgba> {
 }
 
 /// Compatibility helper kept at the gpui-vue-core crate root.
+#[must_use]
 pub fn parse_color(value: &str) -> Option<(f32, f32, f32, f32)> {
     parse_color_rgba(value).map(|color| (color.r, color.g, color.b, color.a))
 }

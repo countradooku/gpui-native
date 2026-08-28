@@ -1,6 +1,6 @@
 //! Syntect syntax highlighting, reduced to a neutral contract.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/syntax/src/lib.rs`.
 //!
 //! The contract is deliberately **colour-free**: a [`HighlightSpan`] carries a
@@ -23,7 +23,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use syntect::easy::ScopeRangeIterator;
-use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
+use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
 /// Sources larger than this are rendered plain. Highlighting a megabyte of
 /// minified JS blocks the frame for longer than anyone will tolerate.
@@ -198,7 +198,7 @@ impl HighlightedDocument {
             }
         }
         for line in &mut lines {
-            *line = normalize_line(std::mem::take(line));
+            *line = normalize_line(line);
         }
         Ok(Self { language, lines })
     }
@@ -223,7 +223,7 @@ fn validate_span(source: &str, range: &Range<usize>) -> Result<(), HighlightErro
 
 /// Flatten overlapping spans on one line into a sorted, non-overlapping run,
 /// resolving each byte to the highest-precedence kind covering it.
-fn normalize_line(spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {
+fn normalize_line(spans: &[HighlightSpan]) -> Vec<HighlightSpan> {
     #[derive(Clone, Copy)]
     enum Edge {
         Start(usize),
@@ -407,7 +407,11 @@ fn syntax_for_language(language: LanguageId) -> Result<&'static SyntaxReference,
 fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
     let mut best = None;
     for scope in stack.as_slice() {
-        let Some(kind) = kind_for_scope_name(&scope.build_string()) else {
+        let Some(kind) = parsed_scope_prefixes()
+            .iter()
+            .find(|(_, prefix, _)| prefix.is_prefix_of(*scope))
+            .map(|(_, _, kind)| *kind)
+        else {
             continue;
         };
         if best.is_none_or(|prev: HighlightKind| kind.precedence() >= prev.precedence()) {
@@ -418,10 +422,16 @@ fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
 }
 
 fn stack_has_prefix(stack: &ScopeStack, prefix: &str) -> bool {
+    let Some((_, prefix, _)) = parsed_scope_prefixes()
+        .iter()
+        .find(|(name, _, _)| *name == prefix)
+    else {
+        return false;
+    };
     stack
         .as_slice()
         .iter()
-        .any(|scope| scope_matches(&scope.build_string(), prefix))
+        .any(|scope| prefix.is_prefix_of(*scope))
 }
 
 fn is_boolean_literal(text: &str) -> bool {
@@ -595,6 +605,23 @@ const SCOPE_PREFIXES: &[(&str, HighlightKind)] = &[
     ("type", HighlightKind::Type),
 ];
 
+fn parsed_scope_prefixes() -> &'static [(&'static str, Scope, HighlightKind)] {
+    static PREFIXES: OnceLock<Vec<(&'static str, Scope, HighlightKind)>> = OnceLock::new();
+    PREFIXES.get_or_init(|| {
+        SCOPE_PREFIXES
+            .iter()
+            .map(|(name, kind)| {
+                (
+                    *name,
+                    Scope::new(name).expect("static TextMate scope prefix must be valid"),
+                    *kind,
+                )
+            })
+            .collect()
+    })
+}
+
+#[cfg(test)]
 fn scope_matches(name: &str, prefix: &str) -> bool {
     name == prefix
         || (name.len() > prefix.len()
@@ -602,9 +629,10 @@ fn scope_matches(name: &str, prefix: &str) -> bool {
             && name.as_bytes()[prefix.len()] == b'.')
 }
 
-/// Map a TextMate scope name onto the nearest [`HighlightKind`].
+/// Map a `TextMate` scope name onto the nearest [`HighlightKind`].
 /// Language prefixes such as `source.rust` are ignored.
-pub fn kind_for_scope_name(name: &str) -> Option<HighlightKind> {
+#[cfg(test)]
+fn kind_for_scope_name(name: &str) -> Option<HighlightKind> {
     SCOPE_PREFIXES
         .iter()
         .find(|(prefix, _)| scope_matches(name, prefix))

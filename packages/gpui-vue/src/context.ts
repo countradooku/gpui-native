@@ -11,6 +11,7 @@ import {
 } from "@vue/runtime-core"
 
 import { GpuiAudioFrames } from "./audio.js"
+import { subscribeRendererEvent } from "./events.js"
 import type { NativeRenderer } from "./native.js"
 import type { GpuiPublicInstance } from "./nodes.js"
 import { GpuiTimeline } from "./timeline.js"
@@ -42,7 +43,7 @@ export function useGpuiRequired(): NativeRenderer {
 }
 
 export interface WindowPollingOptions {
-  /** Poll interval in milliseconds. Defaults to 100. Set false for one read. */
+  /** Fallback poll interval for renderers without window events. Set false for one read. */
   intervalMs?: number | false
 }
 
@@ -58,11 +59,12 @@ function readWindowSize(renderer: NativeRenderer | null): WindowSize {
   return DEFAULT_WINDOW_SIZE
 }
 
-/** Current native window size, sampled every 100ms by default. */
+/** Current native window size, driven by events with polling as a compatibility fallback. */
 export function useWindowSize(options: WindowPollingOptions = {}): Readonly<Ref<WindowSize>> {
   const renderer = inject(GpuiRendererKey, null)
   const size = ref<WindowSize>(readWindowSize(renderer))
   let timer: ReturnType<typeof setInterval> | undefined
+  let unsubscribe: (() => void) | undefined
   onMounted(() => {
     const update = (): void => {
       const next = readWindowSize(renderer)
@@ -70,10 +72,24 @@ export function useWindowSize(options: WindowPollingOptions = {}): Readonly<Ref<
     }
     update()
     const intervalMs = options.intervalMs ?? 100
-    if (intervalMs !== false) timer = setInterval(update, Math.max(16, intervalMs))
+    if (intervalMs === false) return
+    if (renderer?.supportsWindowEvents?.() === true) {
+      unsubscribe = subscribeRendererEvent(renderer, "windowResize", (event) => {
+        if (
+          event.width !== undefined &&
+          event.height !== undefined &&
+          (event.width !== size.value.width || event.height !== size.value.height)
+        ) {
+          size.value = { width: event.width, height: event.height }
+        }
+      })
+    } else {
+      timer = setInterval(update, Math.max(16, intervalMs))
+    }
   })
   onUnmounted(() => {
     if (timer !== undefined) clearInterval(timer)
+    unsubscribe?.()
   })
   return readonly(size)
 }
@@ -109,14 +125,27 @@ function readWindowInsets(renderer: NativeRenderer | null): WindowInsets {
 }
 
 function sameWindowInsets(a: WindowInsets, b: WindowInsets): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  const sameEdges = (left: EdgeInsets, right: EdgeInsets): boolean =>
+    left.top === right.top &&
+    left.right === right.right &&
+    left.bottom === right.bottom &&
+    left.left === right.left
+  return (
+    sameEdges(a.safeArea, b.safeArea) &&
+    sameEdges(a.ime, b.ime) &&
+    sameEdges(a.effective, b.effective) &&
+    a.keyboardTop === b.keyboardTop &&
+    a.keyboardVisible === b.keyboardVisible &&
+    a.visibleHeight === b.visibleHeight
+  )
 }
 
-/** Current safe-area and software-keyboard geometry, sampled every 100ms. */
+/** Current safe-area and software-keyboard geometry, driven by window events when available. */
 export function useWindowInsets(options: WindowPollingOptions = {}): Readonly<Ref<WindowInsets>> {
   const renderer = inject(GpuiRendererKey, null)
   const insets = ref<WindowInsets>(readWindowInsets(renderer))
   let timer: ReturnType<typeof setInterval> | undefined
+  let unsubscribe: (() => void) | undefined
   onMounted(() => {
     const update = (): void => {
       const next = readWindowInsets(renderer)
@@ -124,10 +153,16 @@ export function useWindowInsets(options: WindowPollingOptions = {}): Readonly<Re
     }
     update()
     const intervalMs = options.intervalMs ?? 100
-    if (intervalMs !== false) timer = setInterval(update, Math.max(16, intervalMs))
+    if (intervalMs === false) return
+    if (renderer?.supportsWindowEvents?.() === true) {
+      unsubscribe = subscribeRendererEvent(renderer, "windowResize", update)
+    } else {
+      timer = setInterval(update, Math.max(16, intervalMs))
+    }
   })
   onUnmounted(() => {
     if (timer !== undefined) clearInterval(timer)
+    unsubscribe?.()
   })
   return readonly(insets)
 }
@@ -141,13 +176,15 @@ export interface GpuiWindowControls {
   size(): WindowSize
   insets(): NativeWindowInsets
   setTitle(title: string): void
+  activate(): void
   focus(element: number | GpuiPublicInstance): void
   blur(): void
   selectedText(): string | null
   clearSelection(): void
   scrollTo(element: number | GpuiPublicInstance, x: number, y: number): void
-  scrollToItem(element: number | GpuiPublicInstance, index: number): void
+  scrollToItem(element: number | GpuiPublicInstance, index: number, offsetInItem?: number): void
   scrollOffset(element: number | GpuiPublicInstance): readonly number[] | null
+  listScrollTop(element: number | GpuiPublicInstance): readonly number[] | null
   paintedHighlights(): readonly HighlightMatch[]
   setDebugOverlay(mode: DebugFrameOverlayMode): string | undefined
   cycleDebugOverlay(): string | undefined
@@ -166,13 +203,16 @@ export function useGpuiWindow(): GpuiWindowControls {
         effective: { ...ZERO_EDGES },
       },
     setTitle: (title) => renderer.setWindowTitle?.(title),
+    activate: () => renderer.activateWindow?.(),
     focus: (element) => renderer.focusElement?.(elementId(element)),
     blur: () => renderer.blur?.(),
     selectedText: () => renderer.getSelectedText?.() ?? null,
     clearSelection: () => renderer.clearSelection?.(),
     scrollTo: (element, x, y) => renderer.scrollTo?.(elementId(element), x, y),
-    scrollToItem: (element, index) => renderer.scrollToItem?.(elementId(element), index),
+    scrollToItem: (element, index, offsetInItem) =>
+      renderer.scrollToItem?.(elementId(element), index, offsetInItem),
     scrollOffset: (element) => renderer.getScrollOffset?.(elementId(element)) ?? null,
+    listScrollTop: (element) => renderer.getListScrollTop?.(elementId(element)) ?? null,
     paintedHighlights: () => renderer.getPaintedHighlights?.() ?? [],
     setDebugOverlay: (mode) => renderer.setDebugFrameOverlay?.(mode),
     cycleDebugOverlay: () => renderer.cycleDebugFrameOverlay?.(),

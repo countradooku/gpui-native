@@ -1,7 +1,7 @@
 //! The gpui half of text selection: the per-frame registry, the wash geometry,
 //! and the window-level mouse and key listeners.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: the selection sections of `crates/ui/src/markdown/render.rs`.
 //!
 //! Why the registry is rebuilt during **paint** rather than during build:
@@ -16,8 +16,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use gpui::{
-    canvas, div, point, prelude::*, px, quad, size, BorderStyle, Bounds, Hsla, SharedString,
-    StyledText, TextLayout, TextRun, Window,
+    BorderStyle, Bounds, Hsla, SharedString, StyledText, TextLayout, TextRun, Window, canvas, div,
+    point, prelude::*, px, quad, size,
 };
 
 use super::selection::{self, SelectionState};
@@ -30,6 +30,8 @@ use super::selection::{self, SelectionState};
 /// without an App context. All real access is single-threaded, so the mutex is
 /// always uncontended.
 pub type SharedSelection = Arc<Mutex<SelectionState>>;
+pub type LayoutWash = Box<dyn Fn(&TextLayout, &mut Window)>;
+pub type LinkCallback = Arc<dyn Fn(&str)>;
 
 /// One painted text element, registered per frame in document order.
 struct RegEntry {
@@ -89,7 +91,7 @@ thread_local! {
 pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| {
+        move |_, (), window, _| {
             REGISTRY.with(|r| r.borrow_mut().clear());
             START_REGIONS.with(|r| r.borrow_mut().clear());
             PAINTED.with(|p| p.borrow_mut().clear());
@@ -97,6 +99,7 @@ pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
             super::search::ordinal_frame_reset();
             register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
+            register_drag_listeners(window, &selection);
         },
     )
     .absolute()
@@ -125,7 +128,12 @@ fn start_region_at(position: gpui::Point<gpui::Pixels>) -> Option<bool> {
 
 /// Every string painted in the last frame, in paint order. Test-facing.
 pub fn painted_text() -> Vec<String> {
-    PAINTED.with(|p| p.borrow().iter().map(|s| s.to_string()).collect())
+    PAINTED.with(|p| {
+        p.borrow()
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect()
+    })
 }
 
 /// Every highlight wash painted in the last frame, in paint order. Test-facing.
@@ -156,7 +164,7 @@ pub fn chrome_text(text: SharedString, runs: Option<Vec<TextRun>>) -> gpui::AnyE
     };
     let log = canvas(
         |_, _, _| (),
-        move |_, _, _, _| PAINTED.with(|p| p.borrow_mut().push(text.clone())),
+        move |_, (), _, _| PAINTED.with(|p| p.borrow_mut().push(text.clone())),
     )
     .absolute()
     .w(px(0.0))
@@ -199,11 +207,11 @@ pub struct SelectableText {
     /// Paints additional quads under the glyphs before the selection wash:
     /// inline-code pills, word-diff highlights. Receives the laid-out text so
     /// it can turn byte ranges into rects with [`range_rects`].
-    pub extra_wash: Option<Box<dyn Fn(&TextLayout, &mut Window)>>,
+    pub extra_wash: Option<LayoutWash>,
     /// Clickable byte ranges and their payloads, typically link URLs.
     pub links: Vec<(Range<usize>, String)>,
     /// Called with the payload of the range under a click.
-    pub on_link: Option<Arc<dyn Fn(&str)>>,
+    pub on_link: Option<LinkCallback>,
     /// False under `userSelect: "none"`: the text is still painted, logged and
     /// clickable, but it does not join the selection registry.
     pub selectable: bool,
@@ -267,7 +275,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
 
     let underlay = canvas(
         |_, _, _| (),
-        move |_, _, window, _| {
+        move |_, (), window, _| {
             if let Some(paint) = &extra_wash {
                 paint(&layout, window);
             }
@@ -305,9 +313,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                         text: text.clone(),
                         layout: layout.clone(),
                         group,
-                    })
+                    });
                 });
-                register_listeners(window, &key, &selection);
             }
             PAINTED.with(|p| p.borrow_mut().push(text.clone()));
             if let Some(on_link) = &on_link {
@@ -368,7 +375,7 @@ fn paint_highlight_washes(
                         )
                     })
                     .collect(),
-            })
+            });
         });
     }
 }
@@ -584,25 +591,29 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
     });
 }
 
-/// Register this frame's window-level move and up listeners for one text
-/// element. Down is registered once on the frame reset.
+/// Register this frame's single pair of window-level drag listeners.
 ///
 /// Window-level, not element-level, so a drag keeps tracking after the mouse
-/// leaves the element's bounds. Frame-scoped, so paint re-registers every frame.
-fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSelection) {
+/// leaves the element's bounds. The active key lives in `SelectionState`, so
+/// the listener count is constant regardless of how many text runs are visible.
+fn register_drag_listeners(window: &mut Window, selection: &SharedSelection) {
     use gpui::{DispatchPhase, MouseMoveEvent, MouseUpEvent};
 
     {
-        let (key, selection) = (key.clone(), selection.clone());
+        let selection = selection.clone();
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, _cx| {
             if phase != DispatchPhase::Bubble || !e.dragging() {
                 return;
             }
-            if selection.lock().promote_pending_for(&key) {
+            let (promoted, active_drag) = {
+                let mut state = selection.lock();
+                let promoted = state.promote_pending();
+                (promoted, state.active_drag())
+            };
+            if promoted {
                 window.blur();
             }
-            // Only the anchor element's listener drives the drag.
-            let Some(anchor_ix) = selection.lock().drag_anchor(&key) else {
+            let Some((key, anchor_ix)) = active_drag else {
                 return;
             };
             let Some(head) = registry_point(e.position) else {
@@ -614,14 +625,14 @@ fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSel
         });
     }
     {
-        let (key, selection) = (key.clone(), selection.clone());
+        let selection = selection.clone();
         window.on_mouse_event(move |_: &MouseUpEvent, phase, _window, _cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
             let mut sel = selection.lock();
             sel.cancel_pending();
-            sel.end_drag(&key);
+            sel.end_active_drag();
         });
     }
 }
@@ -688,16 +699,16 @@ pub fn range_rects(
                 (lo, hi)
             }
         };
-        if let Some(p2) = layout.position_for_index(seg_end) {
-            if p2.x > p1.x {
-                rects.push(Bounds::new(
-                    point(p1.x - px(pad_x), p1.y + px(inset_y)),
-                    size(
-                        p2.x - p1.x + px(2.0 * pad_x),
-                        line_height - px(2.0 * inset_y),
-                    ),
-                ));
-            }
+        if let Some(p2) = layout.position_for_index(seg_end)
+            && p2.x > p1.x
+        {
+            rects.push(Bounds::new(
+                point(p1.x - px(pad_x), p1.y + px(inset_y)),
+                size(
+                    p2.x - p1.x + px(2.0 * pad_x),
+                    line_height - px(2.0 * inset_y),
+                ),
+            ));
         }
         if next <= cur {
             break;

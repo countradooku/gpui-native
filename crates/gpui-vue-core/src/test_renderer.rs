@@ -1,3 +1,4 @@
+use parking_lot::Mutex;
 /// TestGpuiRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
 /// Uses gpui::VisualTestAppContext with the native Metal or DirectX renderer
@@ -11,7 +12,7 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -20,8 +21,9 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
-    apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback, GpuiView,
+    DebugFrameOverlayStats, EventCallback, GpuiView, apply_parsed_batch_to_tree,
+    debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, parse_batch_ops,
+    parse_debug_frame_overlay_mode, to_element_id,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -60,9 +62,7 @@ impl Drop for VisualTestState {
         // while the `App` is still alive.
         self.cx.update(|cx| {
             view.update(cx, |view, cx| {
-                if let Ok(mut tree) = view.tree.lock() {
-                    tree.root_id = None;
-                }
+                view.tree.lock().root_id = None;
                 view.custom_registry.destroy_all();
                 view.focus_subscriptions.clear();
                 view.focus_handles.clear();
@@ -174,13 +174,14 @@ impl TestGpuiRenderer {
         // Event callback: push to Vec instead of ThreadsafeFunction.
         let events_clone = events.clone();
         let event_callback: Option<EventCallback> = Some(Arc::new(move |payload: EventPayload| {
-            events_clone.lock().unwrap().push(payload);
+            events_clone.lock().push(payload);
         }));
 
         let tree_clone = tree.clone();
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
+        let clock = crate::automation::AutomationClock::default();
 
         let platform = gpui_platform::current_platform(false);
         let mut cx = gpui::VisualTestAppContext::new(platform);
@@ -199,6 +200,7 @@ impl TestGpuiRenderer {
                         callback_clone,
                         "GPUI Vue Test".to_string(),
                         selection_clone,
+                        clock,
                     )
                 })
             })
@@ -229,7 +231,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
         let id = to_element_id(id)?;
-        self.tree.lock().unwrap().create_element(id, element_type);
+        self.tree.lock().create_element(id, element_type);
         Ok(())
     }
 
@@ -238,7 +240,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
         let id = to_element_id(id)?;
-        let destroyed = self.tree.lock().unwrap().destroy_element(id);
+        let destroyed = self.tree.lock().destroy_element(id);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -246,15 +248,17 @@ impl TestGpuiRenderer {
     pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
         let parent_id = to_element_id(parent_id)?;
         let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().append_child(parent_id, child_id);
-        Ok(())
+        self.tree
+            .lock()
+            .append_child(parent_id, child_id)
+            .map_err(Error::from_reason)
     }
 
     #[napi]
     pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
         let parent_id = to_element_id(parent_id)?;
         let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().remove_child(parent_id, child_id);
+        self.tree.lock().remove_child(parent_id, child_id);
         Ok(())
     }
 
@@ -265,9 +269,8 @@ impl TestGpuiRenderer {
         let before_id = to_element_id(before_id)?;
         self.tree
             .lock()
-            .unwrap()
-            .insert_before(parent_id, child_id, before_id);
-        Ok(())
+            .insert_before(parent_id, child_id, before_id)
+            .map_err(Error::from_reason)
     }
 
     #[napi]
@@ -275,7 +278,6 @@ impl TestGpuiRenderer {
         let id = to_element_id(id)?;
         self.tree
             .lock()
-            .unwrap()
             .set_style_json(id, style_json.as_bytes())
             .map_err(|error| Error::from_reason(format!("Failed to parse style: {error}")))
     }
@@ -283,7 +285,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn set_text(&self, id: f64, content: String) -> Result<()> {
         let id = to_element_id(id)?;
-        self.tree.lock().unwrap().set_text(id, content);
+        self.tree.lock().set_text(id, content);
         Ok(())
     }
 
@@ -292,7 +294,6 @@ impl TestGpuiRenderer {
         let id = to_element_id(id)?;
         self.tree
             .lock()
-            .unwrap()
             .set_event_listener(id, event_type, has_handler);
         Ok(())
     }
@@ -301,7 +302,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn set_root(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
-        self.tree.lock().unwrap().root_id = Some(id);
+        self.tree.lock().set_root(id);
         Ok(())
     }
 
@@ -311,7 +312,7 @@ impl TestGpuiRenderer {
         let id = to_element_id(id)?;
         let value: serde_json::Value = serde_json::from_str(&value_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        self.tree.lock().unwrap().set_custom_prop(id, key, value);
+        self.tree.lock().set_custom_prop(id, key, value);
         Ok(())
     }
 
@@ -319,7 +320,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         Ok(tree
             .get_custom_prop(id, &key)
             .map(|v| serde_json::to_string(v).unwrap_or_default()))
@@ -337,8 +338,9 @@ impl TestGpuiRenderer {
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
-        let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)
+        let parsed = parse_batch_ops(json.as_bytes()).map_err(Error::from_reason)?;
+        let mut tree = self.tree.lock();
+        apply_parsed_batch_to_tree(&mut tree, parsed).map_err(Error::from_reason)
     }
 
     // ── Test-specific methods ────────────────────────────────────────
@@ -684,14 +686,20 @@ impl TestGpuiRenderer {
     /// Scroll a child into view by its index in the children list.
     /// Call flush() after to apply and re-render.
     #[napi]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
                 view.update(app, |view, _cx| {
-                    if view.scroll_virtual_list_to_item(id, index) {
+                    if view.scroll_virtual_list_to_item(id, index, offset) {
                         return;
                     }
                     if let Some(handle) = view.scroll_handles.get(&id) {
@@ -701,6 +709,22 @@ impl TestGpuiRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
             Ok(())
+        })
+    }
+
+    /// Return `[itemIndex, offsetInItemPx, viewportHeightPx]` for a virtual
+    /// list, or null for an ordinary element.
+    #[napi]
+    pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| {
+                    view.virtual_list_scroll_top(id).map(|top| top.to_vec())
+                })
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
         })
     }
 
@@ -831,7 +855,7 @@ impl TestGpuiRenderer {
     /// Events are collected synchronously — no event loop queuing.
     #[napi]
     pub fn drain_events(&self) -> Vec<EventPayload> {
-        let mut events = self.events.lock().unwrap();
+        let mut events = self.events.lock();
         events.drain(..).collect()
     }
 
@@ -840,7 +864,7 @@ impl TestGpuiRenderer {
     /// Get all text content in the tree (depth-first order).
     #[napi]
     pub fn get_all_text(&self) -> Vec<String> {
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         let mut texts = Vec::new();
         if let Some(root_id) = tree.root_id {
             Self::collect_text(root_id, &tree, &mut texts);
@@ -848,10 +872,17 @@ impl TestGpuiRenderer {
         texts
     }
 
+    /// Count every retained native node, including detached nodes that are not
+    /// visible from a root-tree snapshot.
+    #[napi]
+    pub fn get_retained_element_count(&self) -> u32 {
+        u32::try_from(self.tree.lock().elements.len()).unwrap_or(u32::MAX)
+    }
+
     /// Find element IDs matching the given type (e.g. "div", "text").
     #[napi]
     pub fn find_by_type(&self, element_type: String) -> Vec<f64> {
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         tree.elements
             .values()
             .filter(|e| e.element_type == element_type)
@@ -863,7 +894,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn has_event_listener(&self, id: f64, event_type: String) -> Result<bool> {
         let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         Ok(tree
             .elements
             .get(&id)
@@ -875,14 +906,17 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn get_text(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
-        Ok(tree.elements.get(&id).and_then(|e| e.content.clone()))
+        let tree = self.tree.lock();
+        Ok(tree
+            .elements
+            .get(&id)
+            .and_then(|e| e.content.as_ref().map(ToString::to_string)))
     }
 
     /// Get the full tree as JSON for snapshot testing.
     #[napi]
     pub fn get_tree_json(&self) -> Result<String> {
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         let json = tree.to_json(&std::collections::HashMap::new());
         serde_json::to_string_pretty(&json)
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
@@ -892,7 +926,7 @@ impl TestGpuiRenderer {
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
         self.flush()?;
-        let tree = self.tree.lock().unwrap();
+        let tree = self.tree.lock();
         let json = tree.to_automation_json(&crate::automation::all_bounds());
         serde_json::to_string(&json)
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
@@ -982,7 +1016,7 @@ impl TestGpuiRenderer {
     /// Get the root element ID, or null if no root is set.
     #[napi]
     pub fn get_root_id(&self) -> Option<f64> {
-        self.tree.lock().unwrap().root_id.map(|id| id as f64)
+        self.tree.lock().root_id.map(|id| id as f64)
     }
 
     /// The offscreen window size, so `useWindowSize()` reports the same numbers
@@ -1005,7 +1039,7 @@ impl TestGpuiRenderer {
     fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
         if let Some(element) = tree.elements.get(&id) {
             if let Some(ref content) = element.content {
-                texts.push(content.clone());
+                texts.push(content.to_string());
             }
             for &child_id in &element.children {
                 Self::collect_text(child_id, tree, texts);

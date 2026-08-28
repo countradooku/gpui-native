@@ -3,6 +3,7 @@ import {
   defineComponent,
   h,
   inject,
+  onBeforeUnmount,
   provide,
   ref,
   shallowReactive,
@@ -39,16 +40,19 @@ interface SelectContext {
   value: ComputedRef<string | undefined>
   disabled: ComputedRef<boolean>
   activeValue: ShallowRef<string | null>
+  selectedItem: ShallowRef<SelectItemRecord | null>
   items: Map<string, SelectItemRecord>
   triggerRef: ShallowRef<GpuiPublicInstance | null>
+  contentRef: ShallowRef<GpuiPublicInstance | null>
   triggerPressedWhileOpen: ShallowRef<boolean>
   dismissedByOutsidePress: ShallowRef<boolean>
   setOpen(open: boolean): void
   setActiveValue(value: string | null): void
   moveActive(delta: number): void
+  handleTypeahead(event: EventPayload): boolean
   selectValue(value: string): void
   registerItem(item: SelectItemRecord): void
-  unregisterItem(value: string): void
+  unregisterItem(item: SelectItemRecord): void
 }
 
 const SelectKey: InjectionKey<SelectContext> = Symbol("GpuiVueSelect")
@@ -60,10 +64,12 @@ function useSelect(name: string): SelectContext {
 }
 
 export interface SelectProps extends HostProps {
+  modelValue?: string
   value?: string
   defaultValue?: string
   onValueChange?: (value: string) => void
   "onUpdate:value"?: (value: string) => void
+  "onUpdate:modelValue"?: (value: string) => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -75,25 +81,44 @@ export const Select = defineComponent({
   name: "Select",
   inheritAttrs: false,
   props: {
+    modelValue: String,
     value: String,
     defaultValue: String,
     open: { type: Boolean, default: undefined },
     defaultOpen: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
   },
-  emits: ["update:value", "valueChange", "update:open", "openChange"],
+  emits: ["update:modelValue", "update:value", "valueChange", "update:open", "openChange"],
   setup(props, { attrs, emit, slots }) {
     const { renderer } = useGpui()
     const internalValue = ref<string | undefined>(props.defaultValue)
     const internalOpen = ref(props.defaultOpen)
-    const value = computed(() => props.value ?? internalValue.value)
+    const value = computed(() =>
+      props.modelValue !== undefined
+        ? props.modelValue
+        : props.value !== undefined
+          ? props.value
+          : internalValue.value,
+    )
     const open = computed(() => props.open ?? internalOpen.value)
     const disabled = computed(() => props.disabled)
     const activeValue = shallowRef<string | null>(null)
+    const selectedItem = shallowRef<SelectItemRecord | null>(null)
     const items = shallowReactive(new Map<string, SelectItemRecord>())
     const triggerRef = shallowRef<GpuiPublicInstance | null>(null)
+    const contentRef = shallowRef<GpuiPublicInstance | null>(null)
     const triggerPressedWhileOpen = shallowRef(false)
     const dismissedByOutsidePress = shallowRef(false)
+    let typeaheadBuffer = ""
+    let typeaheadTimer: ReturnType<typeof setTimeout> | undefined
+
+    const scrollActiveIntoView = (itemValue: string): void => {
+      const index = [...items.keys()].indexOf(itemValue)
+      if (index < 0) return
+      queueMicrotask(() => {
+        if (contentRef.value !== null) renderer?.scrollToItem?.(contentRef.value.id, index)
+      })
+    }
 
     const setOpen = (next: boolean): void => {
       const previous = open.value
@@ -112,8 +137,9 @@ export const Select = defineComponent({
 
     const setValue = (next: string): void => {
       const previous = value.value
-      if (props.value === undefined) internalValue.value = next
+      if (props.modelValue === undefined && props.value === undefined) internalValue.value = next
       if (next !== previous) {
+        emit("update:modelValue", next)
         emit("update:value", next)
         emit("valueChange", next)
       }
@@ -126,11 +152,43 @@ export const Select = defineComponent({
       const start = current < 0 ? (delta > 0 ? -1 : 0) : current
       const index = (start + delta + enabled.length) % enabled.length
       activeValue.value = enabled[index]?.value ?? null
+      if (activeValue.value !== null) scrollActiveIntoView(activeValue.value)
+    }
+
+    const handleTypeahead = (event: EventPayload): boolean => {
+      if (event.modifiers?.ctrl || event.modifiers?.alt || event.modifiers?.cmd) return false
+      const key = event.keyChar ?? event.key
+      if (key === undefined || [...key].length !== 1 || key === " ") return false
+
+      const character = key.toLocaleLowerCase()
+      if (typeaheadTimer !== undefined) clearTimeout(typeaheadTimer)
+      const repeated =
+        typeaheadBuffer !== "" && [...typeaheadBuffer].every((part) => part === character)
+      typeaheadBuffer = repeated ? character : typeaheadBuffer + character
+      typeaheadTimer = setTimeout(() => {
+        typeaheadBuffer = ""
+        typeaheadTimer = undefined
+      }, 700)
+
+      const enabled = [...items.values()].filter((item) => !item.disabled)
+      if (enabled.length === 0) return true
+      const current = enabled.findIndex((item) => item.value === activeValue.value)
+      for (let offset = 1; offset <= enabled.length; offset += 1) {
+        const item = enabled[(current + offset + enabled.length) % enabled.length]
+        if (item?.textValue.toLocaleLowerCase().startsWith(typeaheadBuffer)) {
+          if (!open.value) setOpen(true)
+          activeValue.value = item.value
+          scrollActiveIntoView(item.value)
+          break
+        }
+      }
+      return true
     }
 
     const selectValue = (next: string): void => {
       const item = items.get(next)
       if (item === undefined || item.disabled) return
+      selectedItem.value = item
       setValue(next)
       setOpen(false)
     }
@@ -140,8 +198,10 @@ export const Select = defineComponent({
       value,
       disabled,
       activeValue,
+      selectedItem,
       items,
       triggerRef,
+      contentRef,
       triggerPressedWhileOpen,
       dismissedByOutsidePress,
       setOpen,
@@ -149,9 +209,18 @@ export const Select = defineComponent({
         activeValue.value = next
       },
       moveActive,
+      handleTypeahead,
       selectValue,
-      registerItem: (item) => items.set(item.value, item),
-      unregisterItem: (itemValue) => items.delete(itemValue),
+      registerItem: (item) => {
+        items.set(item.value, item)
+        if (item.value === value.value) selectedItem.value = item
+      },
+      unregisterItem: (item) => {
+        if (items.get(item.value) === item) items.delete(item.value)
+      },
+    })
+    onBeforeUnmount(() => {
+      if (typeaheadTimer !== undefined) clearTimeout(typeaheadTimer)
     })
 
     return () =>
@@ -232,6 +301,8 @@ export const SelectTrigger = defineComponent({
             context.moveActive(-1)
           } else if (event.key === "enter" || event.key === "space") {
             context.setOpen(!context.open.value)
+          } else {
+            context.handleTypeahead(event)
           }
         },
       })
@@ -254,7 +325,11 @@ export const SelectValue = defineComponent({
     return () => {
       const item =
         context.value.value === undefined ? undefined : context.items.get(context.value.value)
-      const content = slots.default?.() ?? item?.label() ?? props.placeholder
+      const content =
+        slots.default?.() ??
+        item?.label() ??
+        context.selectedItem.value?.label() ??
+        props.placeholder
       return h("div", attrs, content == null ? undefined : [content])
     }
   },
@@ -294,6 +369,9 @@ export const SelectContent = defineComponent({
           align: props.align,
           alignOffset: props.alignOffset,
           collisionPadding: props.collisionPadding,
+          contentRef: (element: GpuiPublicInstance | null) => {
+            context.contentRef.value = element
+          },
           tabIndex: host.tabIndex ?? 0,
           autoFocus: true,
           onMouseDownOutside: (event: EventPayload) => {
@@ -318,8 +396,12 @@ export const SelectContent = defineComponent({
               context.activeValue.value !== null
             ) {
               context.selectValue(context.activeValue.value)
+            } else {
+              context.handleTypeahead(event)
             }
           },
+        } as SelectContentProps & {
+          contentRef: (element: GpuiPublicInstance | null) => void
         },
         slots,
       )
@@ -351,15 +433,22 @@ export const SelectItem = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const context = useSelect("SelectItem")
-    const record = (): SelectItemRecord => ({
+    const item: SelectItemRecord = {
       value: props.value,
       disabled: props.disabled,
       textValue: props.textValue ?? props.value,
       label: () => slots.default?.() ?? props.textValue ?? props.value,
-    })
-    context.registerItem(record())
+    }
+    context.registerItem(item)
+    onBeforeUnmount(() => context.unregisterItem(item))
     return () => {
-      context.registerItem(record())
+      if (item.value !== props.value) {
+        context.unregisterItem(item)
+        item.value = props.value
+      }
+      item.disabled = props.disabled
+      item.textValue = props.textValue ?? props.value
+      context.registerItem(item)
       const state: SelectItemState = {
         selected: context.value.value === props.value,
         highlighted: context.activeValue.value === props.value,
@@ -399,5 +488,30 @@ function passthrough(name: string) {
 export const SelectGroup = passthrough("SelectGroup")
 export const SelectLabel = passthrough("SelectLabel")
 export const SelectSeparator = passthrough("SelectSeparator")
-export const SelectScrollUpButton = passthrough("SelectScrollUpButton")
-export const SelectScrollDownButton = passthrough("SelectScrollDownButton")
+
+function selectScrollButton(name: string, delta: number) {
+  return defineComponent({
+    name,
+    inheritAttrs: false,
+    setup(_props, { attrs, slots }) {
+      const context = useSelect(name)
+      return () => {
+        const host = attrs as HostProps
+        return h(
+          "div",
+          {
+            ...attrs,
+            onClick: (event: EventPayload) => {
+              host.onClick?.(event)
+              context.moveActive(delta)
+            },
+          },
+          slots.default?.(),
+        )
+      }
+    },
+  })
+}
+
+export const SelectScrollUpButton = selectScrollButton("SelectScrollUpButton", -1)
+export const SelectScrollDownButton = selectScrollButton("SelectScrollDownButton", 1)

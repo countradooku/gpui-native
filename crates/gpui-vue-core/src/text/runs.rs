@@ -5,13 +5,13 @@
 //! then never change layout, so a highlight result can land a frame later
 //! without reflowing anything.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `runs_for_syntax_line_with_plain` in `crates/ui/src/markdown/render.rs`.
 
 use gpui::{Font, Hsla, TextRun};
 
 /// A single run covering the whole string.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn plain_runs(text: &str, font: &Font, color: Hsla) -> Vec<TextRun> {
     if text.is_empty() {
         return Vec::new();

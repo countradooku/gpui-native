@@ -1,6 +1,6 @@
 //! Theme tokens for native text editors and document components.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/theme.rs`.
 //!
 //! Colours are declared in **oklch** exactly as the Tailwind v4 palette does, then
@@ -11,15 +11,20 @@
 //! deserializes into [`ThemeOverride`] and is applied on top of [`Theme::dark`].
 //! Unknown keys are ignored so a JS theme object can carry extra fields.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "validated JavaScript theme numbers are normalized into GPUI's f32 metrics"
+)]
+
 use crate::syntax::HighlightKind;
-use gpui::{hsla, Hsla};
+use gpui::{Hsla, hsla};
 use serde::Deserialize;
 
 // ── Colour helpers ───────────────────────────────────────────────────
 
 /// Opaque grey from an 8-bit channel value (`grey(0x0e)` is `#0e0e0e`).
 pub fn grey(value: u8) -> Hsla {
-    hsla(0.0, 0.0, value as f32 / 255.0, 1.0)
+    hsla(0.0, 0.0, f32::from(value) / 255.0, 1.0)
 }
 
 /// Achromatic colour at an oklch lightness — the Tailwind neutral ramp.
@@ -36,7 +41,7 @@ pub fn oklch(l: f32, c: f32, h_deg: f32) -> Hsla {
 }
 
 /// oklch to sRGB, each channel 0..1 and gamut-clipped.
-/// Reference: Björn Ottosson's OKLab, the same matrices CSS Color 4 uses.
+/// Reference: Björn Ottosson's `OKLab`, the same matrices CSS Color 4 uses.
 fn oklch_to_srgb(l: f32, c: f32, h_deg: f32) -> [f32; 3] {
     let h = h_deg.to_radians();
     let a = c * h.cos();
@@ -67,7 +72,7 @@ fn gamma_encode(x: f32) -> f32 {
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let l = (max + min) / 2.0;
+    let l = f32::midpoint(max, min);
     let delta = max - min;
     if delta < f32::EPSILON {
         return (0.0, 0.0, l);
@@ -221,10 +226,19 @@ pub struct Metrics {
     pub diff_body_bottom_pad: f32,
     /// Minimum width of one line-number gutter column.
     pub diff_gutter_width: f32,
+    pub diff_gutter_digit_width: f32,
+    pub diff_gutter_padding_right: f32,
+    pub diff_gutter_gap_left: f32,
     /// The `+` / `−` / `·` marker column.
     pub diff_marker_width: f32,
     pub diff_accent_bar_width: f32,
     pub diff_row_padding_x: f32,
+    pub diff_header_gap: f32,
+    pub diff_header_padding_x: f32,
+    pub diff_chrome_text_size: f32,
+    pub diff_meta_text_size: f32,
+    pub diff_content_padding_left: f32,
+    pub diff_word_radius: f32,
 
     // Markdown.
     pub md_text_size: f32,
@@ -241,6 +255,19 @@ pub struct Metrics {
     /// column keeps a readable width.
     pub md_table_min_column_content: f32,
     pub md_inline_code_radius: f32,
+    pub md_quote_border_width: f32,
+    pub md_quote_radius: f32,
+    pub md_quote_padding_left: f32,
+    pub md_quote_padding_right: f32,
+    pub md_quote_padding_y: f32,
+    pub md_quote_gap: f32,
+    pub md_list_gap: f32,
+    pub md_list_marker_width: f32,
+    pub md_list_marker_size: f32,
+    pub md_list_marker_margin_left: f32,
+    pub md_list_row_gap: f32,
+    pub md_list_item_gap: f32,
+    pub md_rule_height: f32,
     // The fenced-block card. `<code>` paints no card of its own, so these are
     // markdown-only: a document renderer owns its layout, a primitive does not.
     pub md_code_padding_x: f32,
@@ -298,9 +325,24 @@ impl Metrics {
         set(&mut self.diff_notice_height, o.diff_notice_height);
         set(&mut self.diff_body_bottom_pad, o.diff_body_bottom_pad);
         set(&mut self.diff_gutter_width, o.diff_gutter_width);
+        set(&mut self.diff_gutter_digit_width, o.diff_gutter_digit_width);
+        set(
+            &mut self.diff_gutter_padding_right,
+            o.diff_gutter_padding_right,
+        );
+        set(&mut self.diff_gutter_gap_left, o.diff_gutter_gap_left);
         set(&mut self.diff_marker_width, o.diff_marker_width);
         set(&mut self.diff_accent_bar_width, o.diff_accent_bar_width);
         set(&mut self.diff_row_padding_x, o.diff_row_padding_x);
+        set(&mut self.diff_header_gap, o.diff_header_gap);
+        set(&mut self.diff_header_padding_x, o.diff_header_padding_x);
+        set(&mut self.diff_chrome_text_size, o.diff_chrome_text_size);
+        set(&mut self.diff_meta_text_size, o.diff_meta_text_size);
+        set(
+            &mut self.diff_content_padding_left,
+            o.diff_content_padding_left,
+        );
+        set(&mut self.diff_word_radius, o.diff_word_radius);
 
         set(&mut self.md_text_size, o.md_text_size);
         set(&mut self.md_line_height, o.md_line_height);
@@ -315,14 +357,34 @@ impl Metrics {
             o.md_table_min_column_content,
         );
         set(&mut self.md_inline_code_radius, o.md_inline_code_radius);
+        set(&mut self.md_quote_border_width, o.md_quote_border_width);
+        set(&mut self.md_quote_radius, o.md_quote_radius);
+        set(&mut self.md_quote_padding_left, o.md_quote_padding_left);
+        set(&mut self.md_quote_padding_right, o.md_quote_padding_right);
+        set(&mut self.md_quote_padding_y, o.md_quote_padding_y);
+        set(&mut self.md_quote_gap, o.md_quote_gap);
+        set(&mut self.md_list_gap, o.md_list_gap);
+        set(&mut self.md_list_marker_width, o.md_list_marker_width);
+        set(&mut self.md_list_marker_size, o.md_list_marker_size);
+        set(
+            &mut self.md_list_marker_margin_left,
+            o.md_list_marker_margin_left,
+        );
+        set(&mut self.md_list_row_gap, o.md_list_row_gap);
+        set(&mut self.md_list_item_gap, o.md_list_item_gap);
+        set(&mut self.md_rule_height, o.md_rule_height);
         if let Some(sizes) = &o.md_heading_sizes {
             for (slot, value) in self.md_heading_sizes.iter_mut().zip(sizes) {
-                *slot = *value as f32;
+                if value.is_finite() && *value >= 0.0 {
+                    *slot = *value as f32;
+                }
             }
         }
         if let Some(heights) = &o.md_heading_line_heights {
             for (slot, value) in self.md_heading_line_heights.iter_mut().zip(heights) {
-                *slot = *value as f32;
+                if value.is_finite() && *value >= 0.0 {
+                    *slot = *value as f32;
+                }
             }
         }
     }
@@ -348,6 +410,7 @@ impl Metrics {
         }
     }
 
+    #[cfg(test)]
     pub fn hash_into(&self, hasher: &mut impl std::hash::Hasher) {
         let mut feed = |value: f32| hasher.write_u32(value.to_bits());
         for value in [
@@ -368,9 +431,18 @@ impl Metrics {
             self.diff_notice_height,
             self.diff_body_bottom_pad,
             self.diff_gutter_width,
+            self.diff_gutter_digit_width,
+            self.diff_gutter_padding_right,
+            self.diff_gutter_gap_left,
             self.diff_marker_width,
             self.diff_accent_bar_width,
             self.diff_row_padding_x,
+            self.diff_header_gap,
+            self.diff_header_padding_x,
+            self.diff_chrome_text_size,
+            self.diff_meta_text_size,
+            self.diff_content_padding_left,
+            self.diff_word_radius,
             self.md_text_size,
             self.md_line_height,
             self.md_block_gap,
@@ -378,6 +450,19 @@ impl Metrics {
             self.md_table_min_column_width,
             self.md_table_min_column_content,
             self.md_inline_code_radius,
+            self.md_quote_border_width,
+            self.md_quote_radius,
+            self.md_quote_padding_left,
+            self.md_quote_padding_right,
+            self.md_quote_padding_y,
+            self.md_quote_gap,
+            self.md_list_gap,
+            self.md_list_marker_width,
+            self.md_list_marker_size,
+            self.md_list_marker_margin_left,
+            self.md_list_row_gap,
+            self.md_list_item_gap,
+            self.md_rule_height,
         ] {
             feed(value);
         }
@@ -406,9 +491,18 @@ impl Default for Metrics {
             diff_notice_height: 24.0,
             diff_body_bottom_pad: 8.0,
             diff_gutter_width: 36.0,
+            diff_gutter_digit_width: 6.6,
+            diff_gutter_padding_right: 8.0,
+            diff_gutter_gap_left: 6.0,
             diff_marker_width: 28.0,
             diff_accent_bar_width: 3.0,
             diff_row_padding_x: 16.0,
+            diff_header_gap: 8.0,
+            diff_header_padding_x: 12.0,
+            diff_chrome_text_size: 11.0,
+            diff_meta_text_size: 10.5,
+            diff_content_padding_left: 12.0,
+            diff_word_radius: 3.0,
 
             md_text_size: 14.0,
             md_line_height: 22.0,
@@ -421,6 +515,19 @@ impl Default for Metrics {
             md_table_min_column_width: 96.0,
             md_table_min_column_content: 48.0,
             md_inline_code_radius: 4.5,
+            md_quote_border_width: 2.0,
+            md_quote_radius: 6.0,
+            md_quote_padding_left: 12.0,
+            md_quote_padding_right: 10.0,
+            md_quote_padding_y: 6.0,
+            md_quote_gap: 8.0,
+            md_list_gap: 4.0,
+            md_list_marker_width: 18.0,
+            md_list_marker_size: 5.0,
+            md_list_marker_margin_left: 1.0,
+            md_list_row_gap: 8.0,
+            md_list_item_gap: 4.0,
+            md_rule_height: 1.0,
             md_code_padding_x: 12.0,
             md_code_padding_y: 10.0,
             md_code_radius: 10.0,
@@ -542,10 +649,10 @@ impl Theme {
         set(&mut self.diff_del, &o.diff_del);
         set(&mut self.diff_hunk_bg, &o.diff_hunk_bg);
         if let Some(font) = &o.font_mono {
-            self.font_mono = font.clone();
+            self.font_mono.clone_from(font);
         }
         if let Some(font) = &o.font_sans {
-            self.font_sans = font.clone();
+            self.font_sans.clone_from(font);
         }
         if let Some(metrics) = &o.metrics {
             self.metrics.apply(metrics);
@@ -601,6 +708,10 @@ impl Default for Theme {
     }
 }
 
+#[allow(
+    clippy::ref_option,
+    reason = "the helper keeps the large theme-override assignment table uniform and allocation-free"
+)]
 fn set(slot: &mut Hsla, value: &Option<String>) {
     if let Some(color) = value.as_deref().and_then(crate::color::parse_color_rgba) {
         *slot = color.into();
@@ -680,9 +791,18 @@ pub struct MetricsOverride {
     pub diff_notice_height: Option<f64>,
     pub diff_body_bottom_pad: Option<f64>,
     pub diff_gutter_width: Option<f64>,
+    pub diff_gutter_digit_width: Option<f64>,
+    pub diff_gutter_padding_right: Option<f64>,
+    pub diff_gutter_gap_left: Option<f64>,
     pub diff_marker_width: Option<f64>,
     pub diff_accent_bar_width: Option<f64>,
     pub diff_row_padding_x: Option<f64>,
+    pub diff_header_gap: Option<f64>,
+    pub diff_header_padding_x: Option<f64>,
+    pub diff_chrome_text_size: Option<f64>,
+    pub diff_meta_text_size: Option<f64>,
+    pub diff_content_padding_left: Option<f64>,
+    pub diff_word_radius: Option<f64>,
 
     pub md_text_size: Option<f64>,
     pub md_line_height: Option<f64>,
@@ -694,6 +814,19 @@ pub struct MetricsOverride {
     pub md_table_min_column_width: Option<f64>,
     pub md_table_min_column_content: Option<f64>,
     pub md_inline_code_radius: Option<f64>,
+    pub md_quote_border_width: Option<f64>,
+    pub md_quote_radius: Option<f64>,
+    pub md_quote_padding_left: Option<f64>,
+    pub md_quote_padding_right: Option<f64>,
+    pub md_quote_padding_y: Option<f64>,
+    pub md_quote_gap: Option<f64>,
+    pub md_list_gap: Option<f64>,
+    pub md_list_marker_width: Option<f64>,
+    pub md_list_marker_size: Option<f64>,
+    pub md_list_marker_margin_left: Option<f64>,
+    pub md_list_row_gap: Option<f64>,
+    pub md_list_item_gap: Option<f64>,
+    pub md_rule_height: Option<f64>,
     pub md_code_padding_x: Option<f64>,
     pub md_code_padding_y: Option<f64>,
     pub md_code_radius: Option<f64>,
@@ -731,6 +864,11 @@ pub struct SyntaxOverride {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::float_cmp,
+    reason = "theme tests quantize normalized gamut values and assert exact configured metrics"
+)]
 mod tests {
     use super::*;
 

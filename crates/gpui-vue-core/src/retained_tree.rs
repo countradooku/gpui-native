@@ -1,7 +1,7 @@
 /// Retained element tree — the Rust-side source of truth for the UI.
 ///
 /// Vue's custom renderer sends mutations (create, append, remove, etc.) via napi.
-/// This tree stores those mutations. GpuiView builds ephemeral GPUI elements
+/// This tree stores those mutations. `GpuiView` builds ephemeral GPUI elements
 /// from it, while virtual lists defer offscreen subtrees until layout requests them.
 ///
 /// All IDs are u64 — JS generates them with an incrementing counter,
@@ -10,8 +10,96 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use gpui::SharedString;
+
 use crate::style::StyleDesc;
 
+const KNOWN_EVENTS: [&str; 21] = [
+    "toggleFile",
+    "showMore",
+    "lineClick",
+    "linkClick",
+    "change",
+    "submit",
+    "click",
+    "auxClick",
+    "mouseDown",
+    "mouseUp",
+    "mouseEnter",
+    "mouseLeave",
+    "mouseMove",
+    "mouseDownOutside",
+    "keyDown",
+    "keyUp",
+    "focus",
+    "blur",
+    "scroll",
+    "visibleRange",
+    "highlight",
+];
+
+/// Allocation-free lookup for the renderer's event vocabulary, with a small
+/// forward-compatible side set for future/custom event names.
+#[derive(Clone, Default)]
+pub struct EventSet {
+    known: u32,
+    unknown: HashSet<String>,
+}
+
+impl EventSet {
+    fn known_bit(event: &str) -> Option<u32> {
+        KNOWN_EVENTS
+            .iter()
+            .position(|candidate| *candidate == event)
+            .map(|index| 1u32 << index)
+    }
+
+    pub fn contains(&self, event: &str) -> bool {
+        Self::known_bit(event).is_some_and(|bit| self.known & bit != 0)
+            || self.unknown.contains(event)
+    }
+
+    fn insert(&mut self, event: String) -> bool {
+        if let Some(bit) = Self::known_bit(&event) {
+            let changed = self.known & bit == 0;
+            self.known |= bit;
+            changed
+        } else {
+            self.unknown.insert(event)
+        }
+    }
+
+    fn remove(&mut self, event: &str) -> bool {
+        if let Some(bit) = Self::known_bit(event) {
+            let changed = self.known & bit != 0;
+            self.known &= !bit;
+            changed
+        } else {
+            self.unknown.remove(event)
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.known == 0 && self.unknown.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        KNOWN_EVENTS
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.known & (1u32 << index) != 0)
+            .map(|(_, event)| *event)
+            .chain(self.unknown.iter().map(String::as_str))
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.iter().map(str::to_owned).collect();
+        names.sort_unstable();
+        names
+    }
+}
+
+#[derive(Clone)]
 pub struct RetainedElement {
     pub id: u64,
     pub element_type: String,
@@ -26,8 +114,8 @@ pub struct RetainedElement {
     /// Read it with `.as_deref()` to get `Option<&StyleDesc>`. Never mutate
     /// through it; `Arc` has no `DerefMut`, so the compiler enforces that.
     pub style: Option<Arc<StyleDesc>>,
-    pub content: Option<String>,
-    pub events: HashSet<String>,
+    pub content: Option<SharedString>,
+    pub events: EventSet,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
     /// Props for custom elements (input, editor, diff, etc.).
@@ -58,7 +146,7 @@ impl RetainedElement {
             element_type,
             style: None,
             content: None,
-            events: HashSet::new(),
+            events: EventSet::default(),
             children: Vec::new(),
             parent: None,
             auto_focus: false,
@@ -75,8 +163,8 @@ impl RetainedElement {
 /// Deliberately not the std hasher. `mark_changed` probes this map once per
 /// ancestor hop on every append, insert, style and text mutation, and
 /// `build_virtual_list` probes it twice per child on every frame. The keys come
-/// from our own counter, never from user input, so SipHash only costs time.
-pub type ElementMap = rustc_hash::FxHashMap<u64, RetainedElement>;
+/// from our own counter, never from user input, so `SipHash` only costs time.
+pub type ElementMap = rustc_hash::FxHashMap<u64, Arc<RetainedElement>>;
 
 /// One hash-consed style: the raw JSON that produced it, and the shared value.
 ///
@@ -122,12 +210,14 @@ impl StyleTable {
         let mut hasher = rustc_hash::FxHasher::default();
         raw.hash(&mut hasher);
         let key = hasher.finish();
-        if let Some(bucket) = self.entries.get(&key) {
-            if let Some(hit) = bucket.iter().find(|entry| &*entry.raw == raw) {
-                return Ok(hit.style.clone());
-            }
+        if let Some(bucket) = self.entries.get(&key)
+            && let Some(hit) = bucket.iter().find(|entry| &*entry.raw == raw)
+        {
+            return Ok(hit.style.clone());
         }
-        let style: StyleDesc = serde_json::from_slice(raw).map_err(|error| error.to_string())?;
+        let mut style: StyleDesc =
+            serde_json::from_slice(raw).map_err(|error| error.to_string())?;
+        style.resolve_cached_values();
         let shared = Arc::new(style);
         self.entries.entry(key).or_default().push(InternedStyle {
             raw: raw.into(),
@@ -177,6 +267,7 @@ impl StyleTable {
         }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.count
     }
@@ -188,6 +279,12 @@ pub struct RetainedTree {
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     next_revision: u64,
+}
+
+impl Default for RetainedTree {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RetainedTree {
@@ -215,14 +312,45 @@ impl RetainedTree {
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
         let revision = self.take_revision();
-        self.elements
-            .insert(id, RetainedElement::new(id, element_type, revision));
+        self.elements.insert(
+            id,
+            Arc::new(RetainedElement::new(id, element_type, revision)),
+        );
     }
 
     fn take_revision(&mut self) -> u64 {
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         revision
+    }
+
+    /// Monotonic whole-tree revision used to skip frame maintenance that only
+    /// depends on retained mutations.
+    pub fn revision(&self) -> u64 {
+        self.next_revision
+    }
+
+    /// Immutable view used by GPUI after releasing the mutation mutex.
+    ///
+    /// Cloning the map only increments one `Arc` per element. Styles, custom
+    /// payloads, text, and child vectors remain shared; later mutations use
+    /// `Arc::make_mut` on only the records they touch.
+    pub(crate) fn render_snapshot(&self) -> Self {
+        Self {
+            elements: self.elements.clone(),
+            // The renderer reads styles through each element's Arc. The
+            // interning table is mutation-only and must not be duplicated.
+            styles: StyleTable::default(),
+            root_id: self.root_id,
+            next_revision: self.next_revision,
+        }
+    }
+
+    pub fn set_root(&mut self, id: u64) {
+        if self.root_id != Some(id) {
+            self.root_id = Some(id);
+            self.take_revision();
+        }
     }
 
     /// Invalidate `id` and its ancestors, including their searchable text.
@@ -244,6 +372,7 @@ impl RetainedTree {
             let Some(element) = self.elements.get_mut(&current_id) else {
                 break;
             };
+            let element = Arc::make_mut(element);
             element.subtree_revision = revision;
             if search {
                 element.search_revision = revision;
@@ -263,10 +392,11 @@ impl RetainedTree {
     /// longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
-        if let Some(parent_id) = parent_id {
-            if let Some(parent) = self.elements.get_mut(&parent_id) {
-                parent.children.retain(|child| *child != id);
-            }
+        if let Some(parent_id) = parent_id
+            && let Some(parent) = self.elements.get_mut(&parent_id)
+        {
+            let parent = Arc::make_mut(parent);
+            parent.children.retain(|child| *child != id);
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
@@ -275,6 +405,8 @@ impl RetainedTree {
         }
         if let Some(parent_id) = parent_id {
             self.mark_changed(parent_id);
+        } else if !destroyed.is_empty() {
+            self.take_revision();
         }
         destroyed
     }
@@ -282,26 +414,64 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             destroyed.push(id);
-            for child_id in element.children {
+            for &child_id in &element.children {
                 self.destroy_element_recursive(child_id, destroyed);
             }
         }
     }
 
-    pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
+    fn validate_reparent(&self, parent_id: u64, child_id: u64) -> Result<(), String> {
+        if parent_id == child_id {
+            return Err(format!("element {child_id} cannot be its own parent"));
+        }
+        if !self.elements.contains_key(&parent_id) {
+            return Err(format!("parent element {parent_id} does not exist"));
+        }
+        if !self.elements.contains_key(&child_id) {
+            return Err(format!("child element {child_id} does not exist"));
+        }
+
+        // Follow the prospective parent's chain. The step bound also makes
+        // this safe if an older/corrupt tree already contains a cycle.
+        let mut current = Some(parent_id);
+        for _ in 0..=self.elements.len() {
+            let Some(id) = current else {
+                return Ok(());
+            };
+            if id == child_id {
+                return Err(format!(
+                    "reparenting element {child_id} under {parent_id} would create a cycle"
+                ));
+            }
+            current = self.elements.get(&id).and_then(|element| element.parent);
+        }
+        Err("retained tree already contains a parent cycle".to_string())
+    }
+
+    pub fn append_child(&mut self, parent_id: u64, child_id: u64) -> Result<(), String> {
+        self.validate_reparent(parent_id, child_id)?;
+        self.append_child_unchecked(parent_id, child_id);
+        Ok(())
+    }
+
+    /// Apply a relationship already checked by the batch's structural shadow.
+    pub(crate) fn append_child_unchecked(&mut self, parent_id: u64, child_id: u64) {
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
-        if let Some(old_parent_id) = old_parent_id {
-            if let Some(old_parent) = self.elements.get_mut(&old_parent_id) {
-                old_parent.children.retain(|c| *c != child_id);
-            }
+        if let Some(old_parent_id) = old_parent_id
+            && let Some(old_parent) = self.elements.get_mut(&old_parent_id)
+        {
+            let old_parent = Arc::make_mut(old_parent);
+            old_parent.children.retain(|c| *c != child_id);
         }
         // Set new parent
         if let Some(child) = self.elements.get_mut(&child_id) {
+            let child = Arc::make_mut(child);
             child.parent = Some(parent_id);
         }
         // Add to new parent's children
         if let Some(parent) = self.elements.get_mut(&parent_id) {
+            let parent = Arc::make_mut(parent);
             parent.children.push(child_id);
         }
         if let Some(old_parent_id) = old_parent_id {
@@ -312,28 +482,65 @@ impl RetainedTree {
 
     pub fn remove_child(&mut self, parent_id: u64, child_id: u64) {
         if let Some(parent) = self.elements.get_mut(&parent_id) {
+            let parent = Arc::make_mut(parent);
             parent.children.retain(|c| *c != child_id);
         }
         if let Some(child) = self.elements.get_mut(&child_id) {
+            let child = Arc::make_mut(child);
             child.parent = None;
         }
         self.mark_changed(parent_id);
     }
 
-    pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
+    pub fn insert_before(
+        &mut self,
+        parent_id: u64,
+        child_id: u64,
+        before_id: u64,
+    ) -> Result<(), String> {
+        self.validate_reparent(parent_id, child_id)?;
+        if child_id == before_id {
+            return Ok(());
+        }
+        let before_parent = self
+            .elements
+            .get(&before_id)
+            .and_then(|element| element.parent);
+        if before_parent != Some(parent_id) {
+            return Err(format!(
+                "before element {before_id} is not a child of parent {parent_id}"
+            ));
+        }
+        self.insert_before_unchecked(parent_id, child_id, before_id);
+        Ok(())
+    }
+
+    /// Apply a relationship already checked by the batch's structural shadow.
+    pub(crate) fn insert_before_unchecked(
+        &mut self,
+        parent_id: u64,
+        child_id: u64,
+        before_id: u64,
+    ) {
+        if child_id == before_id {
+            return;
+        }
         // Remove from old parent if any
         let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
-        if let Some(old_parent_id) = old_parent_id {
-            if let Some(old_parent) = self.elements.get_mut(&old_parent_id) {
-                old_parent.children.retain(|c| *c != child_id);
-            }
+        if let Some(old_parent_id) = old_parent_id
+            && let Some(old_parent) = self.elements.get_mut(&old_parent_id)
+        {
+            let old_parent = Arc::make_mut(old_parent);
+            old_parent.children.retain(|c| *c != child_id);
         }
         // Set new parent
         if let Some(child) = self.elements.get_mut(&child_id) {
+            let child = Arc::make_mut(child);
             child.parent = Some(parent_id);
         }
         // Insert before the target
         if let Some(parent) = self.elements.get_mut(&parent_id) {
+            let parent = Arc::make_mut(parent);
             let pos = parent
                 .children
                 .iter()
@@ -356,6 +563,7 @@ impl RetainedTree {
     pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
         let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
+            let element = Arc::make_mut(element);
             let same = element
                 .style
                 .as_ref()
@@ -372,11 +580,15 @@ impl RetainedTree {
 
     pub fn set_text(&mut self, id: u64, content: String) {
         let mut changed = false;
-        if let Some(element) = self.elements.get_mut(&id) {
-            if element.content.as_ref() != Some(&content) {
-                element.content = Some(content);
-                changed = true;
-            }
+        if let Some(element) = self.elements.get_mut(&id)
+            && element
+                .content
+                .as_ref()
+                .is_none_or(|current| current.as_ref() != content)
+        {
+            let element = Arc::make_mut(element);
+            element.content = Some(content.into());
+            changed = true;
         }
         if changed {
             self.mark_changed(id);
@@ -384,12 +596,17 @@ impl RetainedTree {
     }
 
     pub fn set_event_listener(&mut self, id: u64, event_type: String, has_handler: bool) {
+        let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
-            if has_handler {
-                element.events.insert(event_type);
+            let element = Arc::make_mut(element);
+            changed = if has_handler {
+                element.events.insert(event_type)
             } else {
-                element.events.remove(&event_type);
-            }
+                element.events.remove(&event_type)
+            };
+        }
+        if changed {
+            self.mark_render_changed(id);
         }
     }
 
@@ -407,23 +624,21 @@ impl RetainedTree {
             .get(&id)
             .is_some_and(|element| element.custom_props.contains_key("highlight"));
         if let Some(element) = self.elements.get_mut(&id) {
+            let element = Arc::make_mut(element);
             // `autoFocus` applies to every element type, so it is lifted out of
             // the custom-prop map that only custom elements read.
             if key == "autoFocus" {
-                element.auto_focus = value.as_bool().unwrap_or(false);
-                return;
-            }
-            if key == "testId" {
+                let auto_focus = value.as_bool().unwrap_or(false);
+                changed = element.auto_focus != auto_focus;
+                element.auto_focus = auto_focus;
+            } else if key == "testId" {
                 element.test_id = value.as_str().map(str::to_string);
                 return;
-            }
-            if value.is_null() {
+            } else if value.is_null() {
                 changed = element.custom_props.remove(&key).is_some();
-            } else {
-                if element.custom_props.get(&key) != Some(&value) {
-                    element.custom_props.insert(key, value);
-                    changed = true;
-                }
+            } else if element.custom_props.get(&key) != Some(&value) {
+                element.custom_props.insert(key, value);
+                changed = true;
             }
         }
         if !changed {
@@ -449,6 +664,10 @@ impl RetainedTree {
         self.elements.get(&id)?.custom_props.get(key)
     }
 
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "macos", target_os = "windows")
+    ))]
     pub fn to_json(
         &self,
         bounds: &std::collections::HashMap<u64, crate::automation::ElementBounds>,
@@ -503,7 +722,7 @@ fn element_to_json(
     if let Some(ref content) = element.content {
         obj.insert(
             "text".to_string(),
-            serde_json::Value::String(content.clone()),
+            serde_json::Value::String(content.to_string()),
         );
     }
 
@@ -524,23 +743,22 @@ fn element_to_json(
             // `as_ref`, not the `Arc`. Serializing the pointer needs serde's
             // `rc` feature, which we never asked for; it only compiles because
             // gpui happens to enable it, and would break when gpui stops.
-            if let Ok(style_json) = serde_json::to_value(style.as_ref()) {
-                if let serde_json::Value::Object(ref map) = style_json {
-                    let filtered: serde_json::Map<String, serde_json::Value> = map
-                        .iter()
-                        .filter(|(_, v)| !v.is_null())
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
-                    if !filtered.is_empty() {
-                        obj.insert("style".to_string(), serde_json::Value::Object(filtered));
-                    }
+            if let Ok(style_json) = serde_json::to_value(style.as_ref())
+                && let serde_json::Value::Object(ref map) = style_json
+            {
+                let filtered: serde_json::Map<String, serde_json::Value> = map
+                    .iter()
+                    .filter(|(_, v)| !v.is_null())
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                if !filtered.is_empty() {
+                    obj.insert("style".to_string(), serde_json::Value::Object(filtered));
                 }
             }
         }
 
         if !element.events.is_empty() {
-            let mut events: Vec<String> = element.events.iter().cloned().collect();
-            events.sort();
+            let events = element.events.names();
             obj.insert("events".to_string(), serde_json::json!(events));
         }
 
@@ -578,8 +796,8 @@ mod tests {
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "text".to_string());
         tree.create_element(3, "text".to_string());
-        tree.append_child(1, 2);
-        tree.append_child(2, 3);
+        tree.append_child(1, 2).unwrap();
+        tree.append_child(2, 3).unwrap();
         tree.set_text(3, "hello".to_string());
         tree
     }
@@ -611,6 +829,31 @@ mod tests {
         tree.destroy_element(1);
         assert_eq!(tree.root_id, None);
         assert!(tree.elements.is_empty());
+    }
+
+    #[test]
+    fn reparenting_rejects_self_and_ancestor_cycles_without_mutation() {
+        let mut tree = tree_with_child();
+        let before = (
+            tree.elements[&1].children.clone(),
+            tree.elements[&2].parent,
+            tree.elements[&3].children.clone(),
+        );
+
+        assert!(tree.append_child(1, 1).unwrap_err().contains("own parent"));
+        assert!(
+            tree.append_child(3, 1)
+                .unwrap_err()
+                .contains("would create a cycle")
+        );
+        assert_eq!(
+            (
+                tree.elements[&1].children.clone(),
+                tree.elements[&2].parent,
+                tree.elements[&3].children.clone(),
+            ),
+            before
+        );
     }
 
     /// The whole point of `search_revision`: `highlight` is a custom prop, so
@@ -727,7 +970,7 @@ mod tests {
         for index in 0..wide {
             let child = 100 + index as u64;
             tree.create_element(child, "div".to_string());
-            tree.append_child(1, child);
+            tree.append_child(1, child).unwrap();
             tree.set_style_json(child, format!(r#"{{"left":{index}}}"#).as_bytes())
                 .unwrap();
         }

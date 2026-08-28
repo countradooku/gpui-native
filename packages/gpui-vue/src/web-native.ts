@@ -1,6 +1,7 @@
 import initWasm, { WebGpuiRenderer as WasmGpuiRenderer } from "@gpui-vue/wasm"
 
 import { handleGpuiEvent } from "./events.js"
+import { MutationRenderer } from "./mutation-renderer.js"
 import type { NativeNodeId, NativeRenderer } from "./native.js"
 import type {
   AudioBufferState,
@@ -9,7 +10,6 @@ import type {
   HighlightMatch,
   NativeWindowInsets,
   NativeWindowOptions,
-  StyleDesc,
   TimelineState,
   WindowSize,
 } from "./types.js"
@@ -29,61 +29,18 @@ function parseJson<T>(json: string): T {
   return JSON.parse(json) as T
 }
 
-export class WebNativeRenderer implements NativeRenderer {
+export class WebNativeRenderer extends MutationRenderer implements NativeRenderer {
   readonly #wasm: WasmGpuiRenderer
   readonly #onEvent: ((event: EventPayload) => void) | undefined
   #eventFrame: number | undefined
 
   constructor(onEvent?: (event: EventPayload) => void) {
+    super()
     if (!initialized) {
       throw new Error("gpui-vue WebAssembly is not initialized; await initGpuiWeb() first")
     }
     this.#wasm = new WasmGpuiRenderer()
     this.#onEvent = onEvent
-  }
-
-  createElement(id: NativeNodeId, elementType: string): void {
-    this.#apply([["createElement", id, elementType]])
-  }
-
-  destroyElement(id: NativeNodeId): NativeNodeId[] {
-    return this.#apply([["destroyElement", id]])
-  }
-
-  appendChild(parentId: NativeNodeId, childId: NativeNodeId): void {
-    this.#apply([["appendChild", parentId, childId]])
-  }
-
-  removeChild(parentId: NativeNodeId, childId: NativeNodeId): void {
-    this.#apply([["removeChild", parentId, childId]])
-  }
-
-  insertBefore(parentId: NativeNodeId, childId: NativeNodeId, beforeId: NativeNodeId): void {
-    this.#apply([["insertBefore", parentId, childId, beforeId]])
-  }
-
-  setStyle(id: NativeNodeId, style: string | StyleDesc | Record<string, unknown>): void {
-    this.#apply([["setStyle", id, style]])
-  }
-
-  setText(id: NativeNodeId, content: string): void {
-    this.#apply([["setText", id, content]])
-  }
-
-  setEventListener(id: NativeNodeId, eventType: string, hasHandler: boolean): void {
-    this.#apply([["setEventListener", id, eventType, hasHandler]])
-  }
-
-  setRoot(id: NativeNodeId): void {
-    this.#apply([["setRoot", id]])
-  }
-
-  setCustomProp(
-    id: NativeNodeId,
-    key: string,
-    value: string | object | number | boolean | null,
-  ): void {
-    this.#apply([["setCustomPropValue", id, key, value]])
   }
 
   getCustomProp(id: NativeNodeId, key: string): string | null {
@@ -117,6 +74,10 @@ export class WebNativeRenderer implements NativeRenderer {
     return this.#wasm.requiresTick()
   }
 
+  supportsWindowEvents(): boolean {
+    return this.#wasm.supportsWindowEvents()
+  }
+
   tick(): boolean {
     const alive = this.#wasm.tick()
     this.#drainEvents()
@@ -129,6 +90,10 @@ export class WebNativeRenderer implements NativeRenderer {
 
   getWindowInsets(): NativeWindowInsets {
     return parseJson(this.#wasm.getWindowInsetsJson())
+  }
+
+  activateWindow(): void {
+    this.#wasm.activateWindow()
   }
 
   setWindowTitle(title: string): void {
@@ -155,8 +120,12 @@ export class WebNativeRenderer implements NativeRenderer {
     this.#wasm.scrollTo(elementId, x, y)
   }
 
-  scrollToItem(elementId: NativeNodeId, index: number): void {
-    this.#wasm.scrollToItem(elementId, index)
+  scrollToItem(elementId: NativeNodeId, index: number, offsetInItem?: number): void {
+    this.#wasm.scrollToItem(elementId, index, offsetInItem)
+  }
+
+  getListScrollTop(elementId: NativeNodeId): number[] | null {
+    return parseJson(this.#wasm.getListScrollTopJson(elementId))
   }
 
   getScrollOffset(elementId: NativeNodeId): number[] | null {
@@ -293,7 +262,7 @@ export class WebNativeRenderer implements NativeRenderer {
     return parseJson(this.#wasm.getAudioBufferStateJson())
   }
 
-  #apply(mutations: unknown[][]): NativeNodeId[] {
+  protected applyMutations(mutations: unknown[][]): NativeNodeId[] {
     return Array.from(this.#wasm.applyBatch(JSON.stringify(mutations)))
   }
 

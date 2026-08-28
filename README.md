@@ -54,17 +54,17 @@ render(App, { title: "My Vue app", width: 800, height: 600 })
 
 ## Native host elements
 
-| Host tag            | Vue component                | Native implementation                                                                                               |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `div`, `text`       | `GpuiDiv`, `GpuiTextElement` | GPUI layout, selectable text, focus, mouse/keyboard/scroll events, and pseudo-state styles                          |
-| `input`, `textarea` | `GpuiInput`, `GpuiTextarea`  | Native editable GPUI text, caret, selection, clipboard, IME, submit/change events, read-only mode, and `v-model`    |
-| `img`, `svg`        | `GpuiImage`, `GpuiSvg`       | Native image loading, object-fit, fallback content, and tinted SVG data                                             |
-| `anchored`          | `GpuiAnchored`               | Deferred anchored layers with side/alignment, offsets, collision switching/snapping, priority, and occlusion        |
-| `code`              | `GpuiCode`                   | Syntect language detection, cached syntax highlighting, optional line numbers, horizontal scrolling, and selection  |
-| `diff`              | `GpuiDiff`                   | Unified-diff parsing, word highlights, collapsed files, show-more rows, line events, and optional virtual scrolling |
-| `markdown`          | `GpuiMarkdown`               | GFM parsing, headings, lists, tables, tasks, inline code, fenced code highlighting, selection, and link events      |
-| `virtual-list`      | `GpuiVirtualList`            | Variable-height GPUI list virtualization, overdraw, alignment, follow-tail, and imperative scrolling                |
-| `canvas`            | `GpuiCanvas`                 | Retained paths, lines, polylines, rectangles, and circles, tessellated only when commands change                    |
+| Host tag            | Vue component                | Native implementation                                                                                                 |
+| ------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `div`, `text`       | `GpuiDiv`, `GpuiTextElement` | GPUI layout, selectable text, focus, mouse/keyboard/scroll events, and pseudo-state styles                            |
+| `input`, `textarea` | `GpuiInput`, `GpuiTextarea`  | Native editable GPUI text, caret, selection, clipboard, IME, submit/change events, read-only mode, and `v-model`      |
+| `img`, `svg`        | `GpuiImage`, `GpuiSvg`       | Native image loading, object-fit, fallback content, and tinted SVG data                                               |
+| `anchored`          | `GpuiAnchored`               | Deferred anchored layers with side/alignment, offsets, collision switching/snapping, priority, and occlusion          |
+| `code`              | `GpuiCode`                   | Syntect language detection, cached syntax highlighting, optional line numbers, horizontal scrolling, and selection    |
+| `diff`              | `GpuiDiff`                   | Unified-diff parsing, word highlights, collapsed files, show-more rows, line events, and default-on virtual scrolling |
+| `markdown`          | `GpuiMarkdown`               | GFM parsing, headings, lists, tables, tasks, inline code, fenced code highlighting, selection, and link events        |
+| `virtual-list`      | `GpuiVirtualList`            | Variable-height GPUI list virtualization, overdraw, alignment, follow-tail, and imperative scrolling                  |
+| `canvas`            | `GpuiCanvas`                 | Retained paths, lines, polylines, rectangles, and circles, tessellated only when commands change                      |
 
 All host tags remain directly usable with `h("code", props)` or templates/JSX. The named components provide discoverable TypeScript props; input components additionally translate Vue `v-model` to native `value`/`change` semantics.
 
@@ -78,7 +78,10 @@ The Vue package includes headless, shadcn-shaped controls rendered entirely thro
 - `FloatingLayer` for reusable anchored content.
 - `motion.div` and `MotionDiv` for native tweens, offset keyframes, physical springs, repeats, and staggered entrances.
 
-The controls support controlled props and Vue update events such as `onUpdate:value`, `onUpdate:open`, and `onUpdate:modelValue`.
+Select and Combobox support ordinary `v-model`/`modelValue`; named `value`
+models remain available for compatibility. Open state uses `v-model:open`.
+Select also supports buffered `textValue` typeahead and keeps the active option
+in view.
 
 ## NodeOps mapping
 
@@ -86,7 +89,7 @@ The controls support controlled props and Vue update events such as `onUpdate:va
 | ------------------------------- | --------------------------------------------------------------------------------- |
 | `createElement(tag)`            | Allocates a stable host ID and creates the matching retained Rust element/factory |
 | `createText(value)`             | Creates a native selectable `text` node                                           |
-| `createComment(value)`          | Creates an empty structural text node for Vue anchors                             |
+| `createComment(value)`          | Keeps a JS-only structural anchor; it never enters native layout                  |
 | `insert(child, parent, anchor)` | Reparents or reorders a node while preserving keyed identity                      |
 | `remove(child)`                 | Detaches the node, clears Vue handlers, and recursively destroys native state     |
 | `setText` / `setElementText`    | Updates text or replaces an element's children                                    |
@@ -100,14 +103,16 @@ the tuples into typed operations before touching the tree, so a malformed batch
 applies nothing. Equal style payloads share one retained allocation and unused
 styles are swept after commits. The tree is updated under one lock and GPUI is
 invalidated once per commit.
+Frames take a structurally shared immutable snapshot and release that lock
+before GPUI layout, input wiring, and paint construction.
 
 ## Composables
 
 - `useGpuiRequired()` returns the current renderer.
 - `useGpuiWindow()` exposes size/insets, title, focus, blur, selection, highlights, scrolling, and debug-overlay controls.
 - `useElementRef()` returns a typed template ref for native elements.
-- `useWindowSize()` polls the native window size; pass `{ intervalMs: false }` for one read.
-- `useWindowInsets()` polls safe-area and software-keyboard geometry and derives the visible content height.
+- `useWindowSize()` follows native resize events; custom renderers without that capability use a configurable polling fallback.
+- `useWindowInsets()` follows the same event path, reads safe-area/software-keyboard geometry, and derives the visible content height.
 - `useTextSearch()` drives a find cursor through the native `highlight` prop; `findRanges()` uses the same Unicode matcher for virtualized rows.
 - `useGpuiTimeline()` controls the live native animation clock: play, pause, seek, and playback rate.
 - `useGpuiAudioFrames()` feeds bounded, interleaved decoded `Float32Array` PCM chunks to the native runtime.
@@ -186,7 +191,7 @@ expect(app.findByText("Saved")).toBeDefined()
 app.unmount()
 ```
 
-For native automation, `GpuiAutomation` exposes normalized tree snapshots, test-id/type lookup, bounds, native clicking and mouse input, deterministic clock control, painted text, and screenshots. `snapshotRenderer()` accepts both the memory renderer's indexed shape and the native renderer's nested tree.
+For native automation, `GpuiAutomation` exposes normalized tree snapshots, test-id/type lookup, bounds, native clicking and mouse input, deterministic clock control, painted text, and screenshots. Memory, native, and SSE automation all expose the same nested tree schema; `snapshotRenderer()` also accepts the older indexed shape.
 
 `createTestRoot({ width, height })` sizes the GPU-backed offscreen window for
 layout and wrapping tests; its native default remains 1280×800.
@@ -227,6 +232,13 @@ pass `{ total, indexOffset }` to `useTextSearch()`.
 
 ## Build
 
+Install Bun 1.4 and Rust through rustup. The checked-in
+`rust-toolchain.toml` installs the pinned compiler, `rust-src`, and
+`wasm32-unknown-unknown`; `rust-src` is required because the browser build uses
+Cargo's unstable `build-std` path. `scripts/build-pages.mts` scopes
+`RUSTC_BOOTSTRAP=1` to that Wasm compilation. Also install the
+`wasm-bindgen-cli` version recorded in `Cargo.lock` when building Pages locally.
+
 ```bash
 bun install
 bun run build
@@ -234,6 +246,7 @@ bun run build:binaries
 bun run build:pages
 bun run test
 bun run check
+bun run bench
 bun --filter @gpui-vue/example-canvas start
 ```
 
@@ -246,23 +259,47 @@ into a standalone executable under that example's `dist/` directory.
 
 `bun run build:pages` compiles the retained Rust renderer against GPUI's single-threaded browser
 platform, generates its `wasm-bindgen` browser bridge, and creates the example gallery under
-`dist-pages/`. Install `wasm32-unknown-unknown` and the `wasm-bindgen-cli` version recorded in
-`Cargo.lock` before running it locally. The deployed gallery is available at
+`dist-pages/`. The deployed gallery is available at
 [countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/).
+
+Applications importing `gpui-vue/web` must alias the virtual
+`@gpui-vue/wasm` module to their generated `wasm-bindgen` JavaScript file. For
+Vite, the essential configuration is:
+
+```ts
+resolve: {
+  alias: {
+    "@gpui-vue/wasm": resolve(projectRoot, "web/pkg/gpui_vue_core.js"),
+  },
+}
+```
 
 Native builds use Syntect's Oniguruma engine; WebAssembly uses its pure-Rust
 fancy-regex engine. Both targets therefore retain the same syntax definitions
 and visual highlighting. Multiple native windows are represented by independent
 canvases in the browser example.
 
-CI runs the Oxc, Vue, TypeScript, and Rust checks plus one native target per OS:
+CI runs formatting, clippy with warnings denied, Oxc, Vue, TypeScript, and Rust
+checks plus one native target per OS:
 Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
-`v0.1.0` creates a GitHub Release containing those bindings after the downloaded
-macOS binding passes its headless smoke test.
+`v0.1.0` creates a GitHub Release containing those bindings after each platform
+passes its headless native smoke test and the generated declaration file is
+checked for drift.
 See [`examples/README.md`](./examples/README.md) for runnable canvas,
-motion/timeline, multi-window, audio-buffer, and counter demos. Pass
+chat, motion/timeline, multi-window, audio-buffer, and counter demos. Pass
 `{ headless: true }` to `renderer.init()` when a retained tree is needed
 without opening a window; headless is a runtime mode of the same parity binary.
+
+## Performance regression benchmarks
+
+`bun run bench` exercises the production JavaScript host links, batching and
+audio queue plus Rust's release-mode `applyBatch` retained-tree path. It reports
+warm-JIT medians and fails when conservative throughput floors or the linked
+sibling speedup are missed. The suite compares current constant-time sibling
+lookup with the former array-scan model, verifies a text-only Vue patch is one
+mutation, and times 10,000-operation Rust text and resolved-style batches. This
+keeps the performance claims reproducible without making CI depend on a single
+machine's absolute timing.
 
 The native engine pins the Zed/GPUI revision whose embedded-window, selectable-text, screenshot, and automation APIs it uses. On Linux, Fontconfig can be loaded dynamically; normal Wayland/XCB/XKB development packages are still recommended. The build script also handles distributions that install compatible runtime XCB/XKB libraries without unversioned linker symlinks.
 
