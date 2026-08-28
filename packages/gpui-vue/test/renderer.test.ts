@@ -35,6 +35,7 @@ import {
   encodeSse,
   findRanges,
   findAutomationNodeByTestId,
+  handleGpuiEvent,
   mountGpui,
   MotionDiv,
   snapshotRenderer,
@@ -902,5 +903,29 @@ describe("GPUI Vue renderer", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 5))
     expect(terminated).toBe(true)
     loop.stop()
+  })
+
+  it("keeps event-driven native windows alive until the close event", () => {
+    vi.useFakeTimers()
+    try {
+      const renderer: NativeRenderer = new MemoryNativeRenderer()
+      renderer.init?.()
+      renderer.supportsWindowEvents = () => true
+      let terminated = false
+      const loop = startFrameLoop(renderer, {
+        keepAlive: true,
+        onTerminated: () => {
+          terminated = true
+        },
+      })
+
+      expect(vi.getTimerCount()).toBe(1)
+      handleGpuiEvent({ elementId: 0, eventType: "windowClose" }, renderer)
+      expect(terminated).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+      loop.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

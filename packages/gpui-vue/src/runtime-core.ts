@@ -36,6 +36,9 @@ export type DefaultRendererFactory = (onEvent?: (event: EventPayload) => void) =
 
 const DEFAULT_FRAME_MS = 8
 const DEFAULT_LIVENESS_MS = 100
+// Node and Bun clamp timers to a signed 32-bit millisecond delay. One dormant
+// interval keeps the JavaScript runtime alive without polling the native UI.
+const EVENT_LOOP_KEEP_ALIVE_MS = 2_147_483_647
 
 interface RenderSlot {
   renderer?: NativeRenderer
@@ -57,19 +60,22 @@ export function startFrameLoop(
     if (options.keepAlive !== true) return { stop() {} }
     if (renderer.supportsWindowEvents?.() === true) {
       let stopped = false
-      const unsubscribe = subscribeRendererEvent(renderer, "windowClose", () => {
+      // N-API event callbacks are deliberately unreferenced, and a native UI
+      // thread alone does not retain the JavaScript process. Hold one dormant
+      // timer until the authoritative native close event arrives.
+      const keepAliveTimer = setInterval(() => undefined, EVENT_LOOP_KEEP_ALIVE_MS)
+      let unsubscribe: (() => void) | undefined
+      const stop = (): void => {
         if (stopped) return
         stopped = true
-        unsubscribe()
+        clearInterval(keepAliveTimer)
+        unsubscribe?.()
+      }
+      unsubscribe = subscribeRendererEvent(renderer, "windowClose", () => {
+        stop()
         options.onTerminated?.()
       })
-      return {
-        stop() {
-          if (stopped) return
-          stopped = true
-          unsubscribe()
-        },
-      }
+      return { stop }
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined
