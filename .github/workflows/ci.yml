@@ -141,7 +141,10 @@ jobs:
         run: bun --filter @gpui-vue/native ${{ matrix.settings.script }} --target ${{ matrix.settings.target }}
         shell: bash
 
-      - name: Verify generated native declarations are current
+      # macOS and Windows include the target-only GPU test renderer, so their
+      # generated declarations intentionally contain additional test APIs.
+      - name: Verify production native declarations are current
+        if: contains(matrix.settings.target, 'linux')
         run: git diff --exit-code -- packages/gpui-vue-native/index.d.ts
         shell: bash
 
