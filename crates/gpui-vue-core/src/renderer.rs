@@ -39,7 +39,7 @@ pub use api::GpuiRenderer;
 
 #[cfg(test)]
 use batch::{BatchResult, apply_batch_to_tree};
-use batch::{apply_parsed_batch_to_tree, parse_batch_ops};
+pub(crate) use batch::{apply_parsed_batch_to_tree, parse_batch_ops};
 pub(crate) use build::build_element;
 use build::unmounted_virtual_row;
 pub(crate) use events::{emit_event_full, mouse_button_to_u32, point_to_xy};

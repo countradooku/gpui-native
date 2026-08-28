@@ -71,13 +71,48 @@ pub struct SyntaxCache {
     documents: HashMap<DocumentKey, CachedDocument>,
     recency: VecDeque<DocumentKey>,
     retained_bytes: usize,
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "macos", target_os = "windows")
+    ))]
+    hits: u64,
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "macos", target_os = "windows")
+    ))]
+    misses: u64,
+}
+
+#[cfg(all(
+    feature = "test-support",
+    any(target_os = "macos", target_os = "windows")
+))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub documents: usize,
 }
 
 impl SyntaxCache {
     fn get(&mut self, key: &DocumentKey) -> CacheLookup {
         let Some(document) = self.documents.get(key).map(|entry| entry.document.clone()) else {
+            #[cfg(all(
+                feature = "test-support",
+                any(target_os = "macos", target_os = "windows")
+            ))]
+            {
+                self.misses += 1;
+            }
             return CacheLookup::Miss;
         };
+        #[cfg(all(
+            feature = "test-support",
+            any(target_os = "macos", target_os = "windows")
+        ))]
+        {
+            self.hits += 1;
+        }
         self.touch(*key);
         CacheLookup::Hit(document)
     }
@@ -175,6 +210,21 @@ pub fn highlight_cached(
     let document = Arc::new(document);
     global().lock().insert(key, document.clone());
     Some(document)
+}
+
+/// Diagnostics used by the GPU-backed test renderer. Keeping the counters
+/// behind `test-support` avoids adding writes to production cache hits.
+#[cfg(all(
+    feature = "test-support",
+    any(target_os = "macos", target_os = "windows")
+))]
+pub fn stats() -> CacheStats {
+    let cache = global().lock();
+    CacheStats {
+        hits: cache.hits,
+        misses: cache.misses,
+        documents: cache.documents.len(),
+    }
 }
 
 #[cfg(test)]
