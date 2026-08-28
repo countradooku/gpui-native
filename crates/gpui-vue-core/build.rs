@@ -3,10 +3,10 @@ fn main() {
         napi_build::setup();
     }
 
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
-        if let Err(error) = linux_runtime_link_shims() {
-            println!("cargo:warning=Could not prepare Linux runtime library shims: {error}");
-        }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
+        && let Err(error) = linux_runtime_link_shims()
+    {
+        println!("cargo:warning=Could not prepare Linux runtime library shims: {error}");
     }
 }
 

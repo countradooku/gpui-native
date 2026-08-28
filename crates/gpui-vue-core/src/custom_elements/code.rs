@@ -1,6 +1,6 @@
 //! `<code>` — a syntax-highlighted, selectable code block.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `render_code_block` in `crates/ui/src/markdown/render.rs`.
 //!
 //! ```tsx
@@ -25,13 +25,19 @@
 //! is pure paint: every run on a line shares the same font and differs only in
 //! colour, so a late highlight can never reflow the block.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "bounded code metrics and line indices narrow to GPUI's f32/u32 representation"
+)]
+
 use std::sync::Arc;
 
-use gpui::{px, Font, Hsla, SharedString};
+use gpui::{Font, Hsla, px};
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::style::StyleDesc;
-use crate::syntax::{cache::highlight_cached, HighlightedDocument};
+use crate::syntax::{HighlightedDocument, cache::highlight_cached};
 use crate::text::runs::runs_for_spans;
 use crate::theme::{Metrics, Theme};
 
@@ -40,7 +46,7 @@ use crate::theme::{Metrics, Theme};
 pub struct CodeFactory;
 
 impl CustomElementFactory for CodeFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "code"
     }
 
@@ -71,7 +77,7 @@ impl CodeElement {
     fn resolve_highlight(&mut self) -> Option<Arc<HighlightedDocument>> {
         let key = (
             self.code.len(),
-            fingerprint(&self.code, &self.language, &self.path),
+            fingerprint(&self.code, self.language.as_ref(), self.path.as_ref()),
         );
         if self.highlight_key == Some(key) {
             return self.highlight.clone();
@@ -117,8 +123,7 @@ fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typograp
             .and_then(|style| style.font_family.clone())
             .unwrap_or_else(|| theme.font_mono.clone()),
         weight: style
-            .and_then(|style| style.font_weight.as_ref())
-            .map(crate::renderer::parse_font_weight)
+            .and_then(StyleDesc::resolved_font_weight)
             .unwrap_or(gpui::FontWeight::NORMAL),
         text_size,
         // `fontSize` alone must scale the row too. Rows are a fixed height, so
@@ -140,12 +145,11 @@ fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typograp
         plain: style
             .and_then(|style| style.color.as_deref())
             .and_then(crate::color::parse_color_rgba)
-            .map(Hsla::from)
-            .unwrap_or(theme.text),
+            .map_or(theme.text, Hsla::from),
     }
 }
 
-fn fingerprint(code: &str, language: &Option<String>, path: &Option<String>) -> u64 {
+fn fingerprint(code: &str, language: Option<&String>, path: Option<&String>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     code.hash(&mut hasher);
@@ -214,7 +218,10 @@ impl CustomElement for CodeElement {
                         .text_color(theme.text_faint)
                         // The gutter is chrome, not content: a drag across the
                         // block must copy code, never a column of numbers.
-                        .child(ctx.chrome_text((line_ix + 1).to_string(), None)),
+                        .child(crate::text::chrome_text(
+                            (line_ix + 1).to_string().into(),
+                            None,
+                        )),
                 );
             }
 
@@ -225,27 +232,21 @@ impl CustomElement for CodeElement {
         }
 
         // The scroller stays a child of the styled surface instead of being the
-        // surface. `wire_standard_events` records the last painted bounds on
+        // surface. `custom_surface` records the last painted bounds on
         // the styled node, and gpui applies the scroll offset to a scroller's
         // own children — merging the two would drift `getElementBounds` (and
         // every automation click) after a horizontal pan.
         let body = gpui::div()
-            .id(SharedString::from(format!(
-                "__gpui_vue_code_body_{}",
-                ctx.id
-            )))
+            .id(super::custom_element_id("__gpui_vue_code_body", ctx.id))
             .flex()
             .min_w_0()
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .child(content);
 
-        let mut block = gpui::div().id(SharedString::from(format!("__gpui_vue_code_{}", ctx.id)));
-        if let Some(style) = ctx.style {
-            block = crate::renderer::apply_styles(block, style);
-        }
+        let block = gpui::div().id(super::custom_element_id("__gpui_vue_code", ctx.id));
+        let mut block = super::custom_surface(block, &ctx);
         block = block.child(body);
-        block = wire_standard_events(block, &ctx);
         block.into_any_element()
     }
 
@@ -271,65 +272,6 @@ impl CustomElement for CodeElement {
     fn destroy(&mut self) {}
 }
 
-/// Attach the mouse events a custom element declares in `supported_events`.
-///
-/// Declaring an event and never installing a handler is worse than not
-/// supporting it: the prop type-checks, the listener is registered on the JS
-/// side, and nothing ever fires.
-pub(crate) fn wire_standard_events(
-    mut el: gpui::Stateful<gpui::Div>,
-    ctx: &CustomRenderContext,
-) -> gpui::Stateful<gpui::Div> {
-    use gpui::prelude::*;
-
-    // Same last-paint box `div` / `text` record. Without this, `getElementBounds`
-    // and automation locators return null for `<markdown>`, `<code>`, and `<diff>`.
-    if ctx
-        .style
-        .and_then(|style| style.position.as_deref())
-        .is_none()
-    {
-        el = el.relative();
-    }
-    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
-
-    let id = ctx.id;
-    for event in ctx.events {
-        let callback = ctx.event_callback.clone();
-        match event.as_str() {
-            "click" => {
-                el = el.on_click(move |click, _window, _cx| {
-                    crate::renderer::emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(click.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.click_count = Some(click.click_count() as u32);
-                        p.modifiers = Some(click.modifiers().into());
-                    });
-                });
-            }
-            "mouseEnter" | "mouseLeave" => {
-                // gpui reports both edges through one listener, so wire it once.
-                if event == "mouseEnter" || !ctx.events.contains("mouseEnter") {
-                    let enter = ctx.events.contains("mouseEnter");
-                    let leave = ctx.events.contains("mouseLeave");
-                    let callback = ctx.event_callback.clone();
-                    el = el.on_hover(move |&hovered, _window, _cx| {
-                        let kind = if hovered { "mouseEnter" } else { "mouseLeave" };
-                        if (hovered && enter) || (!hovered && leave) {
-                            crate::renderer::emit_event_full(&callback, id, kind, |p| {
-                                p.hovered = Some(hovered);
-                            });
-                        }
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    el
-}
-
 /// Line-number gutter width, sized analytically from the digit count so the
 /// code column never shifts as the block scrolls.
 fn gutter_width(line_count: usize, m: &Metrics) -> f32 {
@@ -338,6 +280,10 @@ fn gutter_width(line_count: usize, m: &Metrics) -> f32 {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "typography tests assert exact values from deterministic theme arithmetic"
+)]
 mod tests {
     use super::*;
 
@@ -350,8 +296,10 @@ mod tests {
 
     #[test]
     fn gutter_follows_the_metrics_override() {
-        let mut m = Metrics::default();
-        m.code_gutter_min_width = 64.0;
+        let m = Metrics {
+            code_gutter_min_width: 64.0,
+            ..Metrics::default()
+        };
         assert_eq!(gutter_width(9, &m), 64.0);
     }
 
@@ -402,7 +350,7 @@ mod tests {
     fn a_bare_font_size_scales_the_row_height() {
         let theme = Theme::dark();
         let style = StyleDesc {
-            font_size: Some((theme.metrics.code_text_size * 2.0) as f64),
+            font_size: Some(f64::from(theme.metrics.code_text_size * 2.0)),
             ..Default::default()
         };
         let resolved = typography(Some(&style), &theme, &theme.metrics);
@@ -412,8 +360,10 @@ mod tests {
 
     #[test]
     fn a_zero_text_size_metric_cannot_produce_an_infinite_row() {
-        let mut metrics = Metrics::default();
-        metrics.code_text_size = 0.0;
+        let metrics = Metrics {
+            code_text_size: 0.0,
+            ..Metrics::default()
+        };
         let style = StyleDesc {
             font_size: Some(20.0),
             ..Default::default()

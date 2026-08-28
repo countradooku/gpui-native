@@ -10,8 +10,8 @@ import {
   type VNode,
 } from "@vue/runtime-core"
 
-import { GpuiRendererKey } from "./context.js"
 import { handleGpuiEvent } from "./events.js"
+import { MutationRenderer } from "./mutation-renderer.js"
 import type { NativeRenderer } from "./native.js"
 import { createGpuiRenderer, type GpuiRendererHost } from "./renderer.js"
 import type {
@@ -19,7 +19,6 @@ import type {
   DebugFrameOverlayStats,
   EventPayload,
   HighlightMatch,
-  StyleDesc,
   WindowSize,
 } from "./types.js"
 
@@ -47,6 +46,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getWindowSize(): WindowSize
   getAllText(): string[]
+  getRetainedElementCount(): number
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
@@ -54,8 +54,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   clearSelection(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   scrollTo(elementId: number, x: number, y: number): void
-  scrollToItem(elementId: number, index: number): void
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
+  getListScrollTop(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -103,57 +104,18 @@ export interface NativeTestElement {
 }
 
 /** Vue adapter over GPUI's real GPU-backed TestGpuiRenderer. */
-export class TestRenderer implements NativeRenderer {
+export class TestRenderer extends MutationRenderer implements NativeRenderer {
   commitCount = 0
   readonly #native: NativeTestRendererApi
 
   constructor(options: TestWindowOptions = {}) {
+    super()
     if (NativeTestRenderer === null) {
       throw new Error(
         "Native TestGpuiRenderer is unavailable; build on macOS or Windows with test-support",
       )
     }
     this.#native = new NativeTestRenderer(options.width, options.height)
-  }
-
-  createElement(id: number, elementType: string): void {
-    this.#native.createElement(id, elementType)
-  }
-
-  destroyElement(id: number): number[] {
-    return this.#native.destroyElement(id)
-  }
-
-  appendChild(parentId: number, childId: number): void {
-    this.#native.appendChild(parentId, childId)
-  }
-
-  removeChild(parentId: number, childId: number): void {
-    this.#native.removeChild(parentId, childId)
-  }
-
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.#native.insertBefore(parentId, childId, beforeId)
-  }
-
-  setStyle(id: number, style: string | StyleDesc | Record<string, unknown>): void {
-    this.#native.setStyle(id, typeof style === "string" ? style : JSON.stringify(style))
-  }
-
-  setText(id: number, content: string): void {
-    this.#native.setText(id, content)
-  }
-
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.#native.setEventListener(id, eventType, hasHandler)
-  }
-
-  setRoot(id: number): void {
-    this.#native.setRoot(id)
-  }
-
-  setCustomProp(id: number, key: string, value: string | object | number | boolean | null): void {
-    this.#native.setCustomProp(id, key, typeof value === "string" ? value : JSON.stringify(value))
   }
 
   getCustomProp(id: number, key: string): string | null {
@@ -170,6 +132,10 @@ export class TestRenderer implements NativeRenderer {
     return this.#native.applyBatch(json)
   }
 
+  protected applyMutations(mutations: unknown[][]): number[] {
+    return this.#native.applyBatch(JSON.stringify(mutations))
+  }
+
   flush(): void {
     this.#native.flush()
   }
@@ -182,7 +148,7 @@ export class TestRenderer implements NativeRenderer {
     for (;;) {
       const events = this.#native.drainEvents()
       if (events.length === 0) return
-      for (const event of events) handleGpuiEvent(event)
+      for (const event of events) handleGpuiEvent(event, this)
     }
   }
 
@@ -287,6 +253,10 @@ export class TestRenderer implements NativeRenderer {
     return this.#native.getAllText()
   }
 
+  getRetainedElementCount(): number {
+    return this.#native.getRetainedElementCount()
+  }
+
   getPaintedText(): string[] {
     return this.#native.getPaintedText()
   }
@@ -316,15 +286,21 @@ export class TestRenderer implements NativeRenderer {
     this.#native.flush()
   }
 
-  scrollToItem(elementId: number, index: number): void {
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void {
     this.#native.flush()
-    this.#native.scrollToItem(elementId, index)
+    this.#native.scrollToItem(elementId, index, offsetInItem)
     this.#native.flush()
   }
 
   getScrollOffset(elementId: number): [number, number] | null {
     const offset = this.#native.getScrollOffset(elementId)
     return offset === null ? null : [offset[0] ?? 0, offset[1] ?? 0]
+  }
+
+  getListScrollTop(elementId: number): [number, number, number] | null {
+    this.#native.flush()
+    const top = this.#native.getListScrollTop(elementId)
+    return top === null ? null : [top[0] ?? 0, top[1] ?? 0, top[2] ?? 0]
   }
 
   dragSelect(x1: number, y1: number, x2: number, y2: number): string | null {
@@ -458,10 +434,7 @@ export function createTestRoot(options: TestWindowOptions = {}): NativeGpuiTestR
         name: "GpuiNativeTestRoot",
         setup: () => () => (isVNode(node) ? node : h(node)),
       })
-      app = host.createApp(Root)
-      app.provide(GpuiRendererKey, host.renderer)
-      app.mount(host.root)
-      host.flushMutations()
+      app = host.mount(Root)
       renderer.flush()
     },
     async flush(): Promise<void> {

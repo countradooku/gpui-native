@@ -12,6 +12,37 @@ interface NativeModule {
 
 let nativeModule: NativeModule | undefined
 
+function adaptNativeRenderer(native: NativeGpuiRenderer): NativeRenderer {
+  const methods = new Map<PropertyKey, unknown>()
+  return new Proxy(native, {
+    get(target, property): unknown {
+      const cached = methods.get(property)
+      if (cached !== undefined) return cached
+
+      if (property === "setStyle") {
+        const setStyle: NativeRenderer["setStyle"] = (id, style) => {
+          target.setStyle(id, typeof style === "string" ? style : JSON.stringify(style))
+        }
+        methods.set(property, setStyle)
+        return setStyle
+      }
+      if (property === "setCustomProp") {
+        const setCustomProp: NativeRenderer["setCustomProp"] = (id, key, value) => {
+          target.setCustomProp(id, key, typeof value === "string" ? value : JSON.stringify(value))
+        }
+        methods.set(property, setCustomProp)
+        return setCustomProp
+      }
+
+      const value: unknown = Reflect.get(target, property, target)
+      if (typeof value !== "function") return value
+      const bound = value.bind(target) as unknown
+      methods.set(property, bound)
+      return bound
+    },
+  }) as unknown as NativeRenderer
+}
+
 export function loadNativeModule(): NativeModule {
   if (nativeModule !== undefined) return nativeModule
   const require = createRequire(import.meta.url)
@@ -22,16 +53,18 @@ export function loadNativeModule(): NativeModule {
 export function createNativeRenderer(onEvent?: (event: EventPayload) => void): NativeRenderer {
   const { GpuiRenderer } = loadNativeModule()
   let renderer: NativeRenderer
-  renderer = new GpuiRenderer((error, event) => {
-    if (error !== null) {
-      console.error("[gpui-vue] native event error", error)
-      return
-    }
-    if (event !== null) {
-      handleGpuiEvent(event, renderer)
-      onEvent?.(event)
-    }
-  }) as NativeRenderer
+  renderer = adaptNativeRenderer(
+    new GpuiRenderer((error, event) => {
+      if (error !== null) {
+        console.error("[gpui-vue] native event error", error)
+        return
+      }
+      if (event !== null) {
+        handleGpuiEvent(event, renderer)
+        onEvent?.(event)
+      }
+    }),
+  )
   return renderer
 }
 

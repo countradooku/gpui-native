@@ -1,10 +1,15 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "finite JavaScript overlay coordinates are narrowed to GPUI's f32 geometry"
+)]
+
 /// Anchored custom element for deferred, trigger-relative floating layers.
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 
 pub struct AnchoredFactory;
 
 impl CustomElementFactory for AnchoredFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "anchored"
     }
 
@@ -143,6 +148,10 @@ impl Default for AnchoredElement {
 }
 
 impl AnchoredElement {
+    #[allow(
+        clippy::match_same_arms,
+        reason = "the complete side/alignment table is easier to audit than grouped geometric aliases"
+    )]
     fn resolved_anchor(&self) -> AnchorPoint {
         if let Some(anchor) = self.anchor {
             return anchor;
@@ -176,6 +185,10 @@ impl AnchoredElement {
         )
     }
 
+    #[allow(
+        clippy::match_same_arms,
+        reason = "the complete side/alignment table is easier to audit than grouped geometric aliases"
+    )]
     fn wrap_at_trigger(&self, layer: gpui::AnyElement) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -289,9 +302,13 @@ impl CustomElement for AnchoredElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        let mut content = gpui::div().flex_col();
+        let mut content = gpui::div()
+            .id(super::custom_element_id("__gpui_vue_anchored", ctx.id))
+            .flex_col();
+        content = crate::automation::track_own_bounds(content, ctx.id);
+        content = super::wire_standard_events(content, &ctx);
         if let Some(style) = ctx.style {
-            content = crate::renderer::apply_styles(content, style);
+            content = crate::renderer::apply_interactive_styles(content, style);
         }
         // Deferred overlays paint over the window blur. A missing fill lets the
         // page show through the card. Force an opaque surface when JS omitted one.
@@ -360,11 +377,11 @@ impl CustomElement for AnchoredElement {
                         (
                             offset
                                 .get("x")
-                                .and_then(|value| value.as_f64())
+                                .and_then(serde_json::Value::as_f64)
                                 .unwrap_or(0.0) as f32,
                             offset
                                 .get("y")
-                                .and_then(|value| value.as_f64())
+                                .and_then(serde_json::Value::as_f64)
                                 .unwrap_or(0.0) as f32,
                         )
                     })
@@ -401,7 +418,7 @@ impl CustomElement for AnchoredElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn destroy(&mut self) {}

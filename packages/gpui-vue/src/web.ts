@@ -116,9 +116,7 @@ export { motion, MotionDiv, stagger, type MotionDivProps } from "./motion.js"
 export { createTimeline, GpuiTimeline } from "./timeline.js"
 export { createAudioFrames, GpuiAudioFrames } from "./audio.js"
 export {
-  MemoryNativeBridge,
   MemoryNativeRenderer,
-  type NativeBridge,
   type NativeEventCallback,
   type NativeNodeId,
   type NativeRenderer,

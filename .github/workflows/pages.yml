@@ -24,8 +24,6 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
 
       - name: Install Rust with WebAssembly target
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -35,25 +33,16 @@ jobs:
           rustflags: ""
 
       - name: Cache Cargo
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/wasm-bindgen
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: pages-${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            pages-${{ runner.os }}-cargo-
+          shared-key: pages
+          cache-bins: true
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Install wasm-bindgen CLI
-        run: |
-          if ! command -v wasm-bindgen >/dev/null; then
-            cargo install wasm-bindgen-cli --version 0.2.127 --locked
-          fi
+        run: bun run setup:wasm
 
       - name: Build Pages artifact
         run: bun run build:pages

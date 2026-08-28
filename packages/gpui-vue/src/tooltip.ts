@@ -80,28 +80,37 @@ function useTooltip(name: string): TooltipContext {
 }
 
 export interface TooltipProps extends HostProps {
+  modelValue?: boolean
   open?: boolean
   defaultOpen?: boolean
   delayDuration?: number
   disableHoverableContent?: boolean
   onOpenChange?: (open: boolean) => void
   "onUpdate:open"?: (open: boolean) => void
+  "onUpdate:modelValue"?: (open: boolean) => void
 }
 
 export const Tooltip = defineComponent({
   name: "Tooltip",
   inheritAttrs: false,
   props: {
+    modelValue: { type: Boolean, default: undefined },
     open: { type: Boolean, default: undefined },
     defaultOpen: { type: Boolean, default: false },
     delayDuration: Number,
     disableHoverableContent: { type: Boolean, default: undefined },
   },
-  emits: ["update:open", "openChange"],
+  emits: ["update:modelValue", "update:open", "openChange"],
   setup(props, { attrs, emit, slots }) {
     const provider = inject(TooltipProviderKey, fallbackProvider)
     const internalOpen = ref(props.defaultOpen)
-    const open = computed(() => props.open ?? internalOpen.value)
+    const open = computed(() =>
+      props.modelValue !== undefined
+        ? props.modelValue
+        : props.open !== undefined
+          ? props.open
+          : internalOpen.value,
+    )
     const hoverableDisabled = computed(
       () => props.disableHoverableContent ?? provider.disableHoverableContent.value,
     )
@@ -120,12 +129,13 @@ export const Tooltip = defineComponent({
       const previous = open.value
       cancelOpen()
       cancelClose()
-      if (props.open === undefined) internalOpen.value = next
+      if (props.modelValue === undefined && props.open === undefined) internalOpen.value = next
       if (next !== previous) {
+        emit("update:modelValue", next)
         emit("update:open", next)
         emit("openChange", next)
       }
-      if (!next) provider.lastClosedAt.value = Date.now()
+      if (!next && previous) provider.lastClosedAt.value = Date.now()
     }
     const scheduleOpen = (): void => {
       cancelClose()
@@ -266,7 +276,7 @@ export const TooltipContent = defineComponent({
             host.onMouseLeave?.(event)
             context.scheduleClose()
           },
-        },
+        } as TooltipContentProps,
         slots,
       )
     }

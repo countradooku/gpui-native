@@ -10,5 +10,11 @@ rust-version = "1.85"
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# GPUI paint code conventionally uses compact geometry names and packed RGBA
+# literals; forcing verbose spellings makes those sections harder to compare
+# with upstream without improving correctness.
+many_single_char_names = "allow"
+unreadable_literal = "allow"
+unnested_or_patterns = "allow"

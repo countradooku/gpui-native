@@ -1,6 +1,6 @@
 //! Block-level markdown parsing over pulldown-cmark.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/markdown/parser.rs`.
 //!
 //! pulldown-cmark emits a flat event stream. This turns it into a block tree
@@ -15,8 +15,16 @@ use std::ops::Range;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
 
+/// Bound recursive AST construction and rendering for attacker-controlled
+/// markdown. Content beyond this depth is preserved as plain text.
+const MAX_NESTING_DEPTH: usize = 128;
+
 /// Inline styling flags, threaded through nested emphasis and links.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "markdown inline marks are independent composable formatting flags"
+)]
 pub struct InlineStyle {
     pub bold: bool,
     pub italic: bool,
@@ -35,6 +43,7 @@ pub struct InlineRun {
 
 /// A markdown block. Containers nest.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub enum Block {
     Paragraph {
         runs: Vec<InlineRun>,
@@ -78,6 +87,7 @@ pub struct BlockTree {
 }
 
 impl BlockTree {
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -103,7 +113,7 @@ pub fn parse(source: &str) -> BlockTree {
                 cur.bump();
                 blocks.push(Block::Rule);
             }
-            Event::Start(_) => blocks.extend(parse_started_block(&mut cur)),
+            Event::Start(_) => blocks.extend(parse_started_block(&mut cur, 0)),
             // Stray inline events at the top level should not happen; skip.
             _ => cur.bump(),
         }
@@ -155,17 +165,20 @@ fn is_block_tag(tag: &Tag) -> bool {
 
 /// Consume a `Start(tag)` and everything through its matching `End`.
 /// Unknown containers are transparent: their children splice in.
-fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
+fn parse_started_block(cur: &mut Cursor, depth: usize) -> Vec<Block> {
     let Some(Event::Start(tag)) = cur.next_event() else {
         return Vec::new();
     };
+    if depth >= MAX_NESTING_DEPTH && is_block_tag(&tag) {
+        return plain_blocks_from_container(cur);
+    }
     match tag {
         Tag::Paragraph => vec![Block::Paragraph {
-            runs: parse_inline_container(cur, &InlineStyle::default()),
+            runs: parse_inline_container(cur, &InlineStyle::default(), depth),
         }],
         Tag::Heading { level, .. } => vec![Block::Heading {
             level: heading_level(level),
-            runs: parse_inline_container(cur, &InlineStyle::default()),
+            runs: parse_inline_container(cur, &InlineStyle::default(), depth),
         }],
         Tag::CodeBlock(kind) => {
             let language = match kind {
@@ -191,7 +204,7 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
             vec![Block::CodeBlock { language, code }]
         }
         Tag::BlockQuote(_) => vec![Block::BlockQuote {
-            children: parse_block_sequence(cur),
+            children: parse_block_sequence(cur, depth + 1),
         }],
         Tag::List(ordered_start) => {
             let mut items = Vec::new();
@@ -199,7 +212,7 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
                 match cur.peek_event() {
                     Some(Event::Start(Tag::Item)) => {
                         cur.bump();
-                        items.push(parse_block_sequence(cur));
+                        items.push(parse_block_sequence(cur, depth + 1));
                     }
                     Some(Event::End(_)) | None => {
                         cur.bump();
@@ -247,13 +260,55 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
                 }]
             }
         }
-        _ => parse_block_sequence(cur),
+        _ => parse_block_sequence(cur, depth + 1),
+    }
+}
+
+/// Iteratively consume the container whose `Start` was just read. This is the
+/// overflow path for hostile nesting, so it must not call back into the parser.
+fn plain_blocks_from_container(cur: &mut Cursor) -> Vec<Block> {
+    let mut nesting = 1usize;
+    let mut text = String::new();
+    while let Some(event) = cur.next_event() {
+        match event {
+            Event::Start(_) => nesting += 1,
+            Event::End(_) => {
+                nesting -= 1;
+                if nesting == 0 {
+                    break;
+                }
+            }
+            Event::Text(value)
+            | Event::Code(value)
+            | Event::Html(value)
+            | Event::InlineHtml(value) => text.push_str(&value),
+            Event::SoftBreak => text.push(' '),
+            Event::HardBreak | Event::Rule => text.push('\n'),
+            Event::TaskListMarker(done) => text.push_str(if done { "[x] " } else { "[ ] " }),
+            Event::FootnoteReference(value) => {
+                text.push('[');
+                text.push_str(&value);
+                text.push(']');
+            }
+            _ => {}
+        }
+    }
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        Vec::new()
+    } else {
+        vec![Block::Paragraph {
+            runs: vec![InlineRun {
+                text,
+                style: InlineStyle::default(),
+            }],
+        }]
     }
 }
 
 /// Parse a block sequence until the container's `End`, which is consumed.
 /// Bare inline events (tight list items) accumulate into an implicit paragraph.
-fn parse_block_sequence(cur: &mut Cursor) -> Vec<Block> {
+fn parse_block_sequence(cur: &mut Cursor, depth: usize) -> Vec<Block> {
     let mut out: Vec<Block> = Vec::new();
     let mut inline_acc: Vec<InlineRun> = Vec::new();
     while let Some(event) = cur.peek_event() {
@@ -264,14 +319,14 @@ fn parse_block_sequence(cur: &mut Cursor) -> Vec<Block> {
             }
             Event::Start(tag) if is_block_tag(tag) => {
                 flush_paragraph(&mut out, &mut inline_acc);
-                out.extend(parse_started_block(cur));
+                out.extend(parse_started_block(cur, depth));
             }
             Event::Rule => {
                 flush_paragraph(&mut out, &mut inline_acc);
                 cur.bump();
                 out.push(Block::Rule);
             }
-            _ => parse_inline_event(cur, &mut inline_acc, &InlineStyle::default()),
+            _ => parse_inline_event(cur, &mut inline_acc, &InlineStyle::default(), depth),
         }
     }
     flush_paragraph(&mut out, &mut inline_acc);
@@ -319,7 +374,7 @@ fn parse_table_cells(cur: &mut Cursor) -> Vec<Vec<InlineRun>> {
         match cur.peek_event() {
             Some(Event::Start(Tag::TableCell)) => {
                 cur.bump();
-                cells.push(parse_inline_container(cur, &InlineStyle::default()));
+                cells.push(parse_inline_container(cur, &InlineStyle::default(), 0));
             }
             Some(Event::End(_)) | None => {
                 cur.bump();
@@ -332,14 +387,14 @@ fn parse_table_cells(cur: &mut Cursor) -> Vec<Vec<InlineRun>> {
 }
 
 /// Parse inline events until the container's `End`, which is consumed.
-fn parse_inline_container(cur: &mut Cursor, style: &InlineStyle) -> Vec<InlineRun> {
+fn parse_inline_container(cur: &mut Cursor, style: &InlineStyle, depth: usize) -> Vec<InlineRun> {
     let mut runs = Vec::new();
     while let Some(event) = cur.peek_event() {
         if matches!(event, Event::End(_)) {
             cur.bump();
             break;
         }
-        parse_inline_event(cur, &mut runs, style);
+        parse_inline_event(cur, &mut runs, style, depth);
     }
     // Autolink AFTER merging: pulldown splits `Text` events at would-be
     // emphasis characters, so `…/Foo_(bar)` arrives as three events and a
@@ -347,7 +402,12 @@ fn parse_inline_container(cur: &mut Cursor, style: &InlineStyle) -> Vec<InlineRu
     autolink_runs(merge_runs(runs))
 }
 
-fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &InlineStyle) {
+fn parse_inline_event(
+    cur: &mut Cursor,
+    runs: &mut Vec<InlineRun>,
+    style: &InlineStyle,
+    depth: usize,
+) {
     let Some(event) = cur.next_event() else {
         return;
     };
@@ -357,7 +417,9 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
         }
     };
     match event {
-        Event::Text(t) => push(runs, t.into_string(), style.clone()),
+        Event::Text(t) | Event::Html(t) | Event::InlineHtml(t) => {
+            push(runs, t.into_string(), style.clone());
+        }
         Event::Code(t) => {
             let mut s = style.clone();
             s.code = true;
@@ -365,7 +427,6 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
         }
         Event::SoftBreak => push(runs, " ".into(), style.clone()),
         Event::HardBreak => push(runs, "\n".into(), style.clone()),
-        Event::Html(t) | Event::InlineHtml(t) => push(runs, t.into_string(), style.clone()),
         Event::TaskListMarker(done) => push(
             runs,
             if done { "[x] ".into() } else { "[ ] ".into() },
@@ -383,7 +444,18 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
                 }
                 _ => {}
             }
-            runs.extend(parse_inline_container(cur, &inner));
+            if depth >= MAX_NESTING_DEPTH {
+                for block in plain_blocks_from_container(cur) {
+                    if let Block::Paragraph { runs: plain } = block {
+                        runs.extend(plain.into_iter().map(|mut run| {
+                            run.style = inner.clone();
+                            run
+                        }));
+                    }
+                }
+            } else {
+                runs.extend(parse_inline_container(cur, &inner, depth + 1));
+            }
         }
         // `End` is consumed by the container loop; anything else is ignored.
         _ => {}
@@ -470,10 +542,21 @@ fn bare_url_len(text: &str) -> usize {
         .find(|(_, c)| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\'' | '`'))
         .map_or(text.len(), |(i, _)| i);
     let mut url = &text[..end];
+    let (open_parens, close_parens) =
+        url.bytes()
+            .fold((0usize, 0usize), |counts, byte| match byte {
+                b'(' => (counts.0 + 1, counts.1),
+                b')' => (counts.0, counts.1 + 1),
+                _ => counts,
+            });
+    let mut unmatched_close_parens = close_parens.saturating_sub(open_parens);
     while let Some(last) = url.chars().next_back() {
         let trim = match last {
             '.' | ',' | ';' | ':' | '!' | '?' | '*' | '_' | '~' => true,
-            ')' => url.matches('(').count() < url.matches(')').count(),
+            ')' if unmatched_close_parens > 0 => {
+                unmatched_close_parens -= 1;
+                true
+            }
             _ => false,
         };
         if !trim {
@@ -546,9 +629,10 @@ mod tests {
         assert!(runs.iter().any(|r| r.style.bold && r.text == "bold"));
         assert!(runs.iter().any(|r| r.style.italic && r.text == "em"));
         assert!(runs.iter().any(|r| r.style.code && r.text == "code"));
-        assert!(runs
-            .iter()
-            .any(|r| r.style.strikethrough && r.text == "gone"));
+        assert!(
+            runs.iter()
+                .any(|r| r.style.strikethrough && r.text == "gone")
+        );
     }
 
     #[test]
@@ -581,6 +665,12 @@ mod tests {
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
         assert_eq!(link.text, "https://x.dev/a_(b)");
+    }
+
+    #[test]
+    fn autolink_trims_many_unmatched_parens_in_one_pass() {
+        let url = format!("https://x.dev/{}", ")".repeat(40_000));
+        assert_eq!(bare_url_len(&url), "https://x.dev/".len());
     }
 
     #[test]
@@ -629,9 +719,11 @@ mod tests {
         let Block::List { items, .. } = &tree.blocks[0] else {
             panic!("expected a list");
         };
-        assert!(items[0]
-            .iter()
-            .any(|block| matches!(block, Block::List { .. })));
+        assert!(
+            items[0]
+                .iter()
+                .any(|block| matches!(block, Block::List { .. }))
+        );
     }
 
     #[test]
@@ -642,6 +734,33 @@ mod tests {
         };
         assert!(matches!(children[0], Block::Paragraph { .. }));
         assert!(matches!(children[1], Block::List { .. }));
+    }
+
+    #[test]
+    fn hostile_block_nesting_is_capped_without_losing_text() {
+        let source = format!("{} x", ">".repeat(20_000));
+        let tree = parse(&source);
+        let mut pending: Vec<&Block> = tree.blocks.iter().collect();
+        let mut blocks_seen = 0usize;
+        let mut found_text = false;
+        while let Some(block) = pending.pop() {
+            blocks_seen += 1;
+            assert!(
+                blocks_seen <= MAX_NESTING_DEPTH + 2,
+                "the AST exceeded its nesting cap"
+            );
+            match block {
+                Block::BlockQuote { children } => pending.extend(children),
+                Block::List { items, .. } => {
+                    pending.extend(items.iter().flat_map(|item| item.iter()));
+                }
+                Block::Paragraph { runs } => {
+                    found_text |= runs.iter().any(|run| run.text.contains('x'));
+                }
+                _ => {}
+            }
+        }
+        assert!(found_text, "overflow nesting must preserve visible content");
     }
 
     #[test]

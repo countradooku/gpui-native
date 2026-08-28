@@ -3,7 +3,6 @@ import {
   createSseDecoder,
   encodeSse,
   methods,
-  parseResponse,
   parseWireMessage,
   PROTOCOL_VERSION,
   type AutomationRequest,
@@ -233,34 +232,84 @@ export class InProcessBackend implements AutomationBackend {
 interface PendingRequest {
   resolve(response: AutomationResponse): void
   reject(error: unknown): void
+  timer: ReturnType<typeof setTimeout>
+}
+
+export interface SseBackendOptions {
+  /** Per-request deadline. Defaults to 30 seconds. */
+  requestTimeoutMs?: number | undefined
+  /** Subscribe to EOF/process-exit notifications from the transport. */
+  subscribeClose?: ((listener: (reason?: unknown) => void) => void) | undefined
 }
 
 /** Multiplexes typed calls over an SSE text stream. */
 export class SseBackend implements AutomationBackend {
   #nextId = 1
   readonly #pending = new Map<number, PendingRequest>()
+  readonly #requestTimeoutMs: number
+  #closed = false
 
   constructor(
     readonly write: (chunk: string) => void,
     feed: (listener: (chunk: string) => void) => void,
     readonly onClose?: () => Promise<void>,
+    options: SseBackendOptions = {},
   ) {
+    const timeout = options.requestTimeoutMs ?? 30_000
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      throw new RangeError("SSE request timeout must be a positive finite number")
+    }
+    this.#requestTimeoutMs = timeout
     const decoder = createSseDecoder((message) => {
       if (!("id" in message) || "method" in message || "event" in message) return
       const pending = this.#pending.get(message.id)
       if (pending === undefined) return
       this.#pending.delete(message.id)
-      pending.resolve(parseResponse(message))
+      clearTimeout(pending.timer)
+      pending.resolve(message)
     })
-    feed((chunk) => decoder.feed(chunk))
+    feed((chunk) => {
+      try {
+        decoder.feed(chunk)
+      } catch (error) {
+        this.#failPending(error)
+      }
+    })
+    options.subscribeClose?.((reason) => {
+      this.#closed = true
+      this.#failPending(
+        reason instanceof AutomationError
+          ? reason
+          : new AutomationError(
+              "Closed",
+              `Automation transport closed: ${String(reason ?? "EOF")}`,
+            ),
+      )
+    })
   }
 
   async call<M extends MethodName>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>> {
+    if (this.#closed) throw new AutomationError("Closed", "Automation transport is closed")
     methods[method].params.parse(params)
     const id = this.#nextId++
     const response = await new Promise<AutomationResponse>((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject })
-      this.write(encodeSse({ id, method, params } as AutomationRequest))
+      const timer = setTimeout(() => {
+        this.#pending.delete(id)
+        reject(
+          new AutomationError(
+            "Timeout",
+            `Automation request ${id} (${method}) exceeded ${this.#requestTimeoutMs} ms`,
+          ),
+        )
+      }, this.#requestTimeoutMs)
+      this.#pending.set(id, { resolve, reject, timer })
+      try {
+        this.write(encodeSse({ id, method, params } as AutomationRequest))
+      } catch (error) {
+        clearTimeout(timer)
+        this.#pending.delete(id)
+        reject(error)
+      }
     })
     if ("error" in response) {
       throw new AutomationError(response.error.code, response.error.message, response.error.data)
@@ -269,11 +318,17 @@ export class SseBackend implements AutomationBackend {
   }
 
   async close(): Promise<void> {
-    for (const [id, pending] of this.#pending) {
-      pending.reject(new AutomationError("Closed", `Automation request ${id} closed`))
+    this.#closed = true
+    this.#failPending(new AutomationError("Closed", "Automation transport closed"))
+    await this.onClose?.()
+  }
+
+  #failPending(error: unknown): void {
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
     }
     this.#pending.clear()
-    await this.onClose?.()
   }
 }
 
@@ -712,8 +767,15 @@ export function connectStdio(options: {
   write: (chunk: string) => void
   feed: (listener: (chunk: string) => void) => void
   close?: () => Promise<void>
+  timeoutMs?: number | undefined
+  subscribeClose?: ((listener: (reason?: unknown) => void) => void) | undefined
 }): Promise<App> {
-  return initialize(new SseBackend(options.write, options.feed, options.close))
+  return initialize(
+    new SseBackend(options.write, options.feed, options.close, {
+      requestTimeoutMs: options.timeoutMs,
+      subscribeClose: options.subscribeClose,
+    }),
+  )
 }
 
 export async function launch(options: {
@@ -721,6 +783,7 @@ export async function launch(options: {
   args?: string[]
   cwd?: string
   env?: NodeJS.ProcessEnv
+  timeoutMs?: number | undefined
 }): Promise<App> {
   const { spawn } =
     await importNodeModule<typeof import("node:child_process")>("node:child_process")
@@ -733,6 +796,18 @@ export async function launch(options: {
     write: (chunk) => child.stdin.write(chunk),
     feed: (listener) =>
       child.stdout.on("data", (buffer: Buffer) => listener(buffer.toString("utf8"))),
+    timeoutMs: options.timeoutMs,
+    subscribeClose: (listener) => {
+      child.once("error", listener)
+      child.once("exit", (code, signal) => {
+        listener(
+          new AutomationError(
+            "Closed",
+            `Automation process exited (code ${String(code)}, signal ${String(signal)})`,
+          ),
+        )
+      })
+    },
     close: async () => {
       child.kill()
     },
@@ -766,7 +841,19 @@ export function serveAutomationStdio(backend: AutomationBackend): void {
     void handleAutomationRequest(message, backend).then((reply) => process.stdout.write(reply))
   })
   process.stdin.setEncoding("utf8")
-  process.stdin.on("data", (chunk: string) => decoder.feed(chunk))
+  process.stdin.on("data", (chunk: string) => {
+    try {
+      decoder.feed(chunk)
+    } catch (error) {
+      decoder.reset()
+      process.stdout.write(
+        encodeSse({
+          event: "console",
+          params: { text: `Rejected malformed automation input: ${String(error)}` },
+        }),
+      )
+    }
+  })
 }
 
 export function isServerEvent(message: unknown): message is AutomationServerEvent {

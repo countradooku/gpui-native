@@ -1,10 +1,16 @@
 //! Unified-patch parsing and row flattening.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: the pure sections of `crates/ui/src/changes.rs`.
 //!
 //! Deliberately gpui-free so the parser can be unit tested without a window.
 //! The rendering half lives in `custom_elements/diff.rs`.
+
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "bounded diff line counts narrow to GPUI's u32/f32 display representation"
+)]
 
 use std::ops::Range;
 
@@ -81,11 +87,14 @@ impl FileDiff {
 }
 
 /// Width of one line-number gutter, fitted to the file's largest line number.
-/// 11px mono is about 6.6px per digit, plus an 8px right pad and a 6px left gap
-/// so the number never abuts the accent bar.
+/// Every term comes from the theme so changing diff typography cannot make the
+/// number column clip or shift independently from the rows.
 pub fn gutter_width(file: &FileDiff, metrics: &Metrics) -> f32 {
     let digits = file.max_line.max(1).ilog10() + 1;
-    (digits as f32 * 6.6 + 8.0 + 6.0).max(metrics.diff_gutter_width)
+    (digits as f32 * metrics.diff_gutter_digit_width
+        + metrics.diff_gutter_padding_right
+        + metrics.diff_gutter_gap_left)
+        .max(metrics.diff_gutter_width)
 }
 
 // ── Parser ───────────────────────────────────────────────────────────
@@ -123,21 +132,27 @@ fn parse_git_paths(rest: &str) -> (String, String) {
     }
 }
 
-/// Parse one `@@ -a[,b] +c[,d] @@ …` header into starting line numbers.
-fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
-    let rest = line.strip_prefix("@@")?;
-    let minus = rest.find('-')?;
-    let old: u32 = rest[minus + 1..]
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .next()?
-        .parse()
-        .ok()?;
-    let plus = rest.find('+')?;
-    let new: u32 = rest[plus + 1..]
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .next()?
-        .parse()
-        .ok()?;
+#[derive(Clone, Copy)]
+struct HunkRange {
+    start: u32,
+    count: u32,
+}
+
+/// Parse one `@@ -a[,b] +c[,d] @@ …` header, retaining the counts so a plain
+/// concatenated `diff -u` stream cannot consume the next file header as data.
+fn parse_hunk_header(line: &str) -> Option<(HunkRange, HunkRange)> {
+    fn parse_range(token: &str, marker: char) -> Option<HunkRange> {
+        let value = token.strip_prefix(marker)?;
+        let (start, count) = value.split_once(',').unwrap_or((value, "1"));
+        Some(HunkRange {
+            start: start.parse().ok()?,
+            count: count.parse().ok()?,
+        })
+    }
+
+    let mut tokens = line.strip_prefix("@@")?.split_whitespace();
+    let old = parse_range(tokens.next()?, '-')?;
+    let new = parse_range(tokens.next()?, '+')?;
     Some((old, new))
 }
 
@@ -146,11 +161,17 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 /// Tolerant by design: unknown header lines are skipped and a truncated hunk
 /// keeps whatever parsed. A diff viewer that refuses to render a slightly
 /// malformed patch is useless, and patches are often truncated at a byte cap.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the unified-diff parser is a single-pass state machine whose state transitions stay adjacent"
+)]
 pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut in_hunk = false;
     let mut old_no: u32 = 0;
     let mut new_no: u32 = 0;
+    let mut old_remaining: u32 = 0;
+    let mut new_remaining: u32 = 0;
 
     for raw in patch.lines() {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
@@ -160,9 +181,20 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
             in_hunk = false;
             continue;
         }
+        if in_hunk && old_remaining == 0 && new_remaining == 0 && !raw.starts_with('\\') {
+            in_hunk = false;
+        }
         // A patch without a `diff --git` preamble (plain `diff -u` output, or
         // a bare hunk) still gets a file so the rows have somewhere to live.
         if files.is_empty() && (raw.starts_with("@@") || raw.starts_with("--- ")) {
+            files.push(FileDiff::new(String::new(), None));
+        }
+        // `diff -u` may concatenate files without `diff --git` separators.
+        // Once a counted hunk is complete, a new `---` starts a new file.
+        if raw.starts_with("--- ")
+            && !in_hunk
+            && files.last().is_some_and(|file| !file.hunks.is_empty())
+        {
             files.push(FileDiff::new(String::new(), None));
         }
         let Some(file) = files.last_mut() else {
@@ -170,9 +202,11 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
         };
 
         if raw.starts_with("@@") {
-            if let Some((o, n)) = parse_hunk_header(raw) {
-                old_no = o;
-                new_no = n;
+            if let Some((old, new)) = parse_hunk_header(raw) {
+                old_no = old.start;
+                new_no = new.start;
+                old_remaining = old.count;
+                new_remaining = new.count;
                 file.hunks.push(Hunk {
                     header: raw.to_string(),
                     lines: Vec::new(),
@@ -188,7 +222,7 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
             let body: String = chars.collect();
             let line = match marker {
                 Some('+') => {
-                    file.additions += 1;
+                    file.additions = file.additions.saturating_add(1);
                     let l = DiffLine {
                         kind: LineKind::Add,
                         old_no: None,
@@ -196,11 +230,12 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    new_no += 1;
+                    new_no = new_no.saturating_add(1);
+                    new_remaining = new_remaining.saturating_sub(1);
                     Some(l)
                 }
                 Some('-') => {
-                    file.deletions += 1;
+                    file.deletions = file.deletions.saturating_add(1);
                     let l = DiffLine {
                         kind: LineKind::Del,
                         old_no: Some(old_no),
@@ -208,7 +243,8 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    old_no += 1;
+                    old_no = old_no.saturating_add(1);
+                    old_remaining = old_remaining.saturating_sub(1);
                     Some(l)
                 }
                 Some(' ') | None => {
@@ -219,8 +255,10 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    old_no += 1;
-                    new_no += 1;
+                    old_no = old_no.saturating_add(1);
+                    new_no = new_no.saturating_add(1);
+                    old_remaining = old_remaining.saturating_sub(1);
+                    new_remaining = new_remaining.saturating_sub(1);
                     Some(l)
                 }
                 Some('\\') => Some(DiffLine {
@@ -236,15 +274,15 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                     None
                 }
             };
-            if let Some(line) = line {
-                if let Some(hunk) = file.hunks.last_mut() {
-                    file.max_line = file
-                        .max_line
-                        .max(line.old_no.unwrap_or(0))
-                        .max(line.new_no.unwrap_or(0));
-                    hunk.lines.push(line);
-                    continue;
-                }
+            if let Some(line) = line
+                && let Some(hunk) = file.hunks.last_mut()
+            {
+                file.max_line = file
+                    .max_line
+                    .max(line.old_no.unwrap_or(0))
+                    .max(line.new_no.unwrap_or(0));
+                hunk.lines.push(line);
+                continue;
             }
             if in_hunk {
                 continue;
@@ -271,12 +309,20 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
             let new = new.trim();
             if new == "/dev/null" {
                 file.status = FileStatus::Deleted;
-            } else if file.old_path.is_none() {
-                file.path = strip_git_prefix(new).to_string();
+            } else {
+                let new = strip_git_prefix(new).to_string();
+                file.path.clone_from(&new);
+                if file.old_path.as_deref() == Some(new.as_str()) {
+                    file.old_path = None;
+                }
             }
         } else if let Some(old) = raw.strip_prefix("--- ") {
             if old.trim() == "/dev/null" {
                 file.status = FileStatus::Added;
+            } else if file.path.is_empty() {
+                let old = strip_git_prefix(old.trim()).to_string();
+                file.path.clone_from(&old);
+                file.old_path = Some(old);
             }
         }
         // "index …", "similarity index …", "old mode …": skipped.
@@ -380,7 +426,7 @@ pub fn word_diff(old: &str, new: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>)
     let collapse = |words: &[Range<usize>]| -> Vec<Range<usize>> {
         let changed = &words[prefix..words.len() - suffix];
         match (changed.first(), changed.last()) {
-            (Some(first), Some(last)) => vec![first.start..last.end],
+            (Some(first), Some(last)) => std::iter::once(first.start..last.end).collect(),
             _ => Vec::new(),
         }
     };
@@ -570,6 +616,10 @@ pub fn estimated_row_height(rows: &[DiffRow], metrics: &Metrics) -> f32 {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "diff metric tests assert exact deterministic theme values"
+)]
 mod tests {
     use super::*;
 
@@ -671,6 +721,34 @@ mod tests {
     }
 
     #[test]
+    fn maximum_line_numbers_saturate_instead_of_wrapping() {
+        let files = parse_patch("@@ -4294967295 +1 @@\n-old\n+new\n");
+        let lines = &files[0].hunks[0].lines;
+        assert_eq!(lines[0].old_no, Some(u32::MAX));
+        assert_eq!(files[0].max_line, u32::MAX);
+    }
+
+    #[test]
+    fn counted_hunks_split_concatenated_plain_diffs() {
+        let files = parse_patch(concat!(
+            "--- a/one.txt\n",
+            "+++ b/one.txt\n",
+            "@@ -1 +1 @@\n",
+            "-old one\n",
+            "+new one\n",
+            "--- a/two.txt\n",
+            "+++ b/two.txt\n",
+            "@@ -1 +1 @@\n",
+            "-old two\n",
+            "+new two\n",
+        ));
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "one.txt");
+        assert_eq!(files[1].path, "two.txt");
+        assert_eq!(files[1].hunks[0].lines[0].text, "old two");
+    }
+
+    #[test]
     fn an_empty_patch_yields_no_files() {
         assert!(parse_patch("").is_empty());
     }
@@ -688,8 +766,10 @@ mod tests {
 
     #[test]
     fn gutter_follows_the_metrics_override() {
-        let mut metrics = Metrics::default();
-        metrics.diff_gutter_width = 80.0;
+        let metrics = Metrics {
+            diff_gutter_width: 80.0,
+            ..Metrics::default()
+        };
         let file = FileDiff::new("a".into(), None);
         assert_eq!(gutter_width(&file, &metrics), 80.0);
     }
@@ -759,10 +839,12 @@ mod tests {
         // 1 deletion against 2 additions must not be paired by index.
         let mut uneven = parse_patch("diff --git a/a b/a\n@@ -1,1 +1,2 @@\n-x\n+y\n+z\n");
         annotate_word_diffs(&mut uneven);
-        assert!(uneven[0].hunks[0]
-            .lines
-            .iter()
-            .all(|l| l.word_ranges.is_empty()));
+        assert!(
+            uneven[0].hunks[0]
+                .lines
+                .iter()
+                .all(|l| l.word_ranges.is_empty())
+        );
     }
 
     #[test]
@@ -806,8 +888,10 @@ mod tests {
 
     #[test]
     fn row_heights_come_from_the_metrics() {
-        let mut m = Metrics::default();
-        m.diff_line_height = 40.0;
+        let m = Metrics {
+            diff_line_height: 40.0,
+            ..Metrics::default()
+        };
         assert_eq!(
             DiffRow::Line {
                 file: 0,
@@ -850,9 +934,11 @@ mod tests {
                 .count(),
             1
         );
-        assert!(!rows
-            .iter()
-            .any(|row| matches!(row, DiffRow::FileHeader { file: 1 })));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, DiffRow::FileHeader { file: 1 }))
+        );
     }
 
     #[test]
@@ -882,9 +968,11 @@ mod tests {
             3
         );
         assert_eq!(rows.last(), Some(&DiffRow::ShowMore { remaining: 3 }));
-        assert!(!rows
-            .iter()
-            .any(|row| matches!(row, DiffRow::FileHeader { file: 1 })));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, DiffRow::FileHeader { file: 1 }))
+        );
     }
 
     #[test]

@@ -11,18 +11,16 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::SharedString;
-
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::markdown::parser::{parse, BlockTree};
-use crate::markdown::render::{render_tree, MdContext};
+use crate::markdown::parser::{BlockTree, parse};
+use crate::markdown::render::{MdContext, PreparedCodeBlock, prepare_code_blocks, render_tree};
 use crate::renderer::emit_event_full;
 use crate::theme::Theme;
 
 pub struct MarkdownFactory;
 
 impl CustomElementFactory for MarkdownFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "markdown"
     }
 
@@ -38,28 +36,18 @@ pub struct MarkdownElement {
     /// Parsed tree for the current source. `Rc` so a frame clones a pointer
     /// rather than every block, string and inline run in the document.
     tree: Option<Rc<BlockTree>>,
-    parsed_len: Option<usize>,
-    parsed_hash: Option<u64>,
+    code_blocks: Arc<[PreparedCodeBlock]>,
 }
 
 impl MarkdownElement {
     fn tree(&mut self) -> Rc<BlockTree> {
-        let hash = hash64(&self.source);
-        let stale = self.parsed_hash != Some(hash) || self.parsed_len != Some(self.source.len());
-        if stale || self.tree.is_none() {
-            self.tree = Some(Rc::new(parse(&self.source)));
-            self.parsed_hash = Some(hash);
-            self.parsed_len = Some(self.source.len());
+        if self.tree.is_none() {
+            let tree = Rc::new(parse(&self.source));
+            self.code_blocks = prepare_code_blocks(&tree);
+            self.tree = Some(tree);
         }
         self.tree.clone().expect("just parsed")
     }
-}
-
-fn hash64(source: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
 }
 
 impl CustomElement for MarkdownElement {
@@ -77,7 +65,8 @@ impl CustomElement for MarkdownElement {
         // Link clicks are hit-tested per byte range inside the painted text, so
         // clicking prose emits nothing and clicking the second link emits the
         // second URL.
-        let on_link: Option<Arc<dyn Fn(&str)>> = if ctx.events.contains("linkClick") {
+        let on_link: Option<crate::text::paint::LinkCallback> = if ctx.events.contains("linkClick")
+        {
             let callback = ctx.event_callback.clone();
             let element_id = ctx.id;
             Some(Arc::new(move |url: &str| {
@@ -98,14 +87,12 @@ impl CustomElement for MarkdownElement {
             theme.clone(),
             on_link,
             ctx.highlight_set.clone(),
+            self.code_blocks.clone(),
         );
         let body = render_tree(&tree, &mut md, window);
 
-        let mut container = gpui::div()
-            .id(SharedString::from(format!(
-                "__gpui_vue_markdown_{}",
-                ctx.id
-            )))
+        let container = gpui::div().id(super::custom_element_id("__gpui_vue_markdown", ctx.id));
+        let container = super::custom_surface(container, &ctx)
             .flex()
             .flex_col()
             .w_full()
@@ -116,16 +103,20 @@ impl CustomElement for MarkdownElement {
             .line_height(gpui::px(theme.metrics.md_line_height))
             .child(body);
 
-        container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
         container.into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "source" => self.source = value.as_str().unwrap_or("").to_string(),
+            "source" => {
+                let source = value.as_str().unwrap_or("");
+                if self.source != source {
+                    self.source.clear();
+                    self.source.push_str(source);
+                    self.tree = None;
+                    self.code_blocks = Arc::default();
+                }
+            }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
         }

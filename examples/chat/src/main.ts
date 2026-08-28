@@ -13,5 +13,4 @@ render(App, {
   windowBackground: "blurred",
   trafficLightX: 16,
   trafficLightY: 17,
-  debugFrameOverlay: "full",
 })

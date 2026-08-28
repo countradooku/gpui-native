@@ -38,6 +38,7 @@ interface ComboboxContext {
   value: ComputedRef<ComboboxModelValue>
   inputValue: ComputedRef<string>
   filteredItems: ComputedRef<readonly string[]>
+  filteredIndex: ComputedRef<ReadonlyMap<string, number>>
   activeIndex: Ref<number | null>
   inputRef: ShallowRef<GpuiPublicInstance | null>
   itemToString(item: string): string
@@ -59,29 +60,28 @@ function useCombobox(name: string): ComboboxContext {
 }
 
 function defaultFilter(
-  items: readonly string[],
+  items: readonly { item: string; foldedLabel: string }[],
   query: string,
-  itemToString: (item: string) => string,
 ): string[] {
   const normalized = query.trim().toLowerCase()
-  if (normalized === "") return [...items]
-  return items
-    .map((item, index) => {
-      const label = itemToString(item).toLowerCase()
-      const rank = label.startsWith(normalized) ? 0 : label.includes(normalized) ? 1 : -1
-      return { item, index, rank }
-    })
-    .filter((match) => match.rank >= 0)
-    .sort((left, right) => left.rank - right.rank || left.index - right.index)
-    .map((match) => match.item)
+  if (normalized === "") return items.map(({ item }) => item)
+  const prefix: string[] = []
+  const substring: string[] = []
+  for (const { item, foldedLabel } of items) {
+    if (foldedLabel.startsWith(normalized)) prefix.push(item)
+    else if (foldedLabel.includes(normalized)) substring.push(item)
+  }
+  return prefix.concat(substring)
 }
 
 export interface ComboboxProps extends HostProps {
   items?: readonly string[]
+  modelValue?: ComboboxModelValue
   value?: ComboboxModelValue
   defaultValue?: ComboboxModelValue
   onValueChange?: (value: ComboboxModelValue) => void
   "onUpdate:value"?: (value: ComboboxModelValue) => void
+  "onUpdate:modelValue"?: (value: ComboboxModelValue) => void
   inputValue?: string
   defaultInputValue?: string
   onInputValueChange?: (value: string) => void
@@ -102,6 +102,7 @@ export const Combobox = defineComponent({
   inheritAttrs: false,
   props: {
     items: { type: Array as PropType<readonly string[]>, default: () => [] },
+    modelValue: [String, Array] as PropType<ComboboxModelValue | undefined>,
     value: [String, Array] as PropType<ComboboxModelValue | undefined>,
     defaultValue: {
       type: [String, Array] as PropType<ComboboxModelValue>,
@@ -123,6 +124,7 @@ export const Combobox = defineComponent({
     itemToStringValue: Function as PropType<(item: string) => string>,
   },
   emits: [
+    "update:modelValue",
     "update:value",
     "valueChange",
     "update:inputValue",
@@ -135,7 +137,13 @@ export const Combobox = defineComponent({
     const internalValue = ref<ComboboxModelValue>(props.defaultValue)
     const internalInput = ref(props.defaultInputValue)
     const internalOpen = ref(props.defaultOpen)
-    const value = computed(() => props.value ?? internalValue.value)
+    const value = computed(() =>
+      props.modelValue !== undefined
+        ? props.modelValue
+        : props.value !== undefined
+          ? props.value
+          : internalValue.value,
+    )
     const inputValue = computed(() => props.inputValue ?? internalInput.value)
     const open = computed(() => props.open ?? internalOpen.value)
     const disabled = computed(() => props.disabled)
@@ -144,14 +152,22 @@ export const Combobox = defineComponent({
     const inputRef = shallowRef<GpuiPublicInstance | null>(null)
     const disabledItems = shallowReactive(new Set<string>())
     const itemToString = (item: string): string => props.itemToStringValue?.(item) ?? item
+    const searchIndex = computed(() =>
+      props.items.map((item) => ({ item, foldedLabel: itemToString(item).toLowerCase() })),
+    )
 
-    const filteredItems = computed<readonly string[]>(() => {
-      if (props.filter === null) return [...props.items]
+    const filterItems = (query: string): readonly string[] => {
+      if (props.filter === null) return props.items
       if (props.filter !== undefined) {
-        return props.items.filter((item) => props.filter?.(item, inputValue.value, itemToString))
+        return props.items.filter((item) => props.filter?.(item, query, itemToString))
       }
-      return defaultFilter(props.items, inputValue.value, itemToString)
-    })
+      return defaultFilter(searchIndex.value, query)
+    }
+
+    const filteredItems = computed<readonly string[]>(() => filterItems(inputValue.value))
+    const filteredIndex = computed<ReadonlyMap<string, number>>(
+      () => new Map(filteredItems.value.map((item, index) => [item, index])),
+    )
 
     const setOpen = (next: boolean): void => {
       const previous = open.value
@@ -174,16 +190,16 @@ export const Combobox = defineComponent({
         emit("update:inputValue", next)
         emit("inputValueChange", next)
       }
-      const nextItems =
-        props.filter === null ? [...props.items] : defaultFilter(props.items, next, itemToString)
+      const nextItems = inputValue.value === next ? filteredItems.value : filterItems(next)
       const firstEnabled = nextItems.findIndex((item) => !disabledItems.has(item))
       activeIndex.value = props.autoHighlight && firstEnabled >= 0 ? firstEnabled : null
     }
 
     const setValue = (next: ComboboxModelValue): void => {
       const previous = value.value
-      if (props.value === undefined) internalValue.value = next
+      if (props.modelValue === undefined && props.value === undefined) internalValue.value = next
       if (!Object.is(next, previous)) {
+        emit("update:modelValue", next)
         emit("update:value", next)
         emit("valueChange", next)
       }
@@ -229,6 +245,7 @@ export const Combobox = defineComponent({
       value,
       inputValue,
       filteredItems,
+      filteredIndex,
       activeIndex,
       inputRef,
       itemToString,
@@ -403,7 +420,7 @@ export const ComboboxContent = defineComponent({
             host.onMouseDownOutside?.(event)
             context.setOpen(false)
           },
-        },
+        } as ComboboxContentProps,
         slots,
       )
     }
@@ -453,7 +470,7 @@ export const ComboboxItem = defineComponent({
     onBeforeUnmount(() => context.unregisterItem(props.value))
     return () => {
       context.registerItem(props.value, props.disabled)
-      const index = context.filteredItems.value.indexOf(props.value)
+      const index = context.filteredIndex.value.get(props.value) ?? -1
       const model = context.value.value
       const state: ComboboxItemState = {
         selected: Array.isArray(model) ? model.includes(props.value) : model === props.value,

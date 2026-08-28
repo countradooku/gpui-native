@@ -1,72 +1,30 @@
-export interface EventModifiers {
-  shift: boolean
-  ctrl: boolean
-  alt: boolean
-  cmd: boolean
-}
+import type {
+  AudioBufferState as GeneratedAudioBufferState,
+  DebugFrameOverlayStats as GeneratedDebugFrameOverlayStats,
+  EdgeInsets as GeneratedEdgeInsets,
+  EventModifiers as GeneratedEventModifiers,
+  EventPayload as GeneratedEventPayload,
+  HighlightMatch as GeneratedHighlightMatch,
+  TimelineState as GeneratedTimelineState,
+  WindowInsets as GeneratedWindowInsets,
+  WindowOptions as GeneratedWindowOptions,
+  WindowSize as GeneratedWindowSize,
+} from "@gpui-vue/native"
+import type { VNodeRef } from "@vue/runtime-core"
 
-export interface EventPayload {
-  elementId: number
-  eventType: string
-  x?: number
-  y?: number
-  button?: number
-  clickCount?: number
-  isRightClick?: boolean
-  pressedButton?: number
-  key?: string
-  keyChar?: string
-  isHeld?: boolean
-  deltaX?: number
-  deltaY?: number
-  precise?: boolean
-  touchPhase?: string
-  hovered?: boolean
-  value?: string
-  oldLine?: number
-  newLine?: number
-  startIndex?: number
-  endIndex?: number
-  matchCount?: number
-  modifiers?: EventModifiers
-}
+/** Native ABI types are generated from the Rust N-API surface. */
+export type EventModifiers = GeneratedEventModifiers
+export type EventPayload = GeneratedEventPayload
+export type WindowSize = GeneratedWindowSize
+export type TimelineState = GeneratedTimelineState
+export type AudioBufferState = GeneratedAudioBufferState
 
-export interface WindowSize {
-  width: number
-  height: number
-}
-
-export interface TimelineState {
-  currentTimeMs: number
-  playbackRate: number
-  playing: boolean
-}
-
-export interface AudioBufferState {
-  sampleRate: number
-  channels: number
-  capacityFrames: number
-  queuedFrames: number
-  droppedFrames: number
-}
-
-export interface NativeWindowOptions {
-  /** Retain and test the native tree without opening a platform window. */
-  headless?: boolean
-  /** Name used by macOS `Hide X` and `Quit X`; the executable owns the menu title. */
-  appName?: string
-  title?: string
-  width?: number
-  height?: number
-  minWidth?: number
-  minHeight?: number
-  resizable?: boolean
-  fullscreen?: boolean
-  transparent?: boolean
-  titlebarTransparent?: boolean
+export type NativeWindowOptions = Omit<GeneratedWindowOptions, "windowBackground"> & {
   windowBackground?: "opaque" | "transparent" | "blurred"
-  trafficLightX?: number
-  trafficLightY?: number
+  /** Open without taking keyboard focus. Ignored by GPUI on Linux. */
+  focus?: boolean
+  /** Open hidden; call `activateWindow()`/`useGpuiWindow().activate()` to reveal it. */
+  show?: boolean
 }
 
 export type DimensionValue = number | string
@@ -293,9 +251,18 @@ export interface GpuiMetrics {
   diffNoticeHeight?: number
   diffBodyBottomPad?: number
   diffGutterWidth?: number
+  diffGutterDigitWidth?: number
+  diffGutterPaddingRight?: number
+  diffGutterGapLeft?: number
   diffMarkerWidth?: number
   diffAccentBarWidth?: number
   diffRowPaddingX?: number
+  diffHeaderGap?: number
+  diffHeaderPaddingX?: number
+  diffChromeTextSize?: number
+  diffMetaTextSize?: number
+  diffContentPaddingLeft?: number
+  diffWordRadius?: number
   mdTextSize?: number
   mdLineHeight?: number
   mdBlockGap?: number
@@ -305,6 +272,19 @@ export interface GpuiMetrics {
   mdTableMinColumnWidth?: number
   mdTableMinColumnContent?: number
   mdInlineCodeRadius?: number
+  mdQuoteBorderWidth?: number
+  mdQuoteRadius?: number
+  mdQuotePaddingLeft?: number
+  mdQuotePaddingRight?: number
+  mdQuotePaddingY?: number
+  mdQuoteGap?: number
+  mdListGap?: number
+  mdListMarkerWidth?: number
+  mdListMarkerSize?: number
+  mdListMarkerMarginLeft?: number
+  mdListRowGap?: number
+  mdListItemGap?: number
+  mdRuleHeight?: number
   mdCodePaddingX?: number
   mdCodePaddingY?: number
   mdCodeRadius?: number
@@ -349,21 +329,15 @@ export interface HighlightSpec {
 }
 
 /** One highlight wash painted in the last frame. */
-export interface HighlightMatch {
-  elementId: number
-  sub: number
-  text: string
-  start: number
-  end: number
-  active: boolean
-  rects: Array<{ x: number; y: number; width: number; height: number }>
-}
+export type HighlightMatch = GeneratedHighlightMatch
 
 export type GpuiEventHandler = (event: EventPayload) => void
 
 export interface HostProps {
   /** Vue reconciliation key; never forwarded to the native element. */
   key?: PropertyKey
+  /** Template/component ref; consumed by Vue and never forwarded. */
+  ref?: VNodeRef
   style?: StyleDesc
   class?: string
   className?: string
@@ -523,6 +497,7 @@ export interface DiffProps extends HostProps {
   patch?: string
   wordDiff?: boolean
   collapsedPaths?: string[]
+  /** Native list virtualization is enabled by default; set false for parent-owned scrolling. */
   scroll?: boolean
   maxLines?: number
   theme?: GpuiTheme
@@ -571,29 +546,11 @@ export type GpuiElementType =
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
 
-export interface EdgeInsets {
-  top: number
-  right: number
-  bottom: number
-  left: number
-}
+export type EdgeInsets = GeneratedEdgeInsets
+export type NativeWindowInsets = GeneratedWindowInsets
+export type DebugFrameOverlayStats = GeneratedDebugFrameOverlayStats
 
-export interface NativeWindowInsets {
-  safeArea: EdgeInsets
-  ime: EdgeInsets
-  effective: EdgeInsets
-}
-
-export interface DebugFrameOverlayStats {
-  currentMs?: number
-  p90Ms?: number
-  p99Ms?: number
-  maxMs?: number
-  frames: number
-  samples: number
-}
-
-export interface WindowOptions extends NativeWindowOptions {
+export type WindowOptions = NativeWindowOptions & {
   onEvent?: (event: EventPayload) => void
   debugFrameOverlay?: DebugFrameOverlayMode
 }

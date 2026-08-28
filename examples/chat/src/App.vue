@@ -18,7 +18,6 @@ import ChatIcon from "./ChatIcon.vue"
 import ChipPicker from "./ChipPicker.vue"
 import {
   accessOptions,
-  baseTurns,
   branchOptions,
   chatTheme,
   colors,
@@ -36,7 +35,7 @@ import {
 } from "./data.js"
 import type { IconName } from "./icons.js"
 
-const TRAFFIC_LIGHT_CLEARANCE = process.platform === "darwin" ? 86 : 8
+const TRAFFIC_LIGHT_CLEARANCE = globalThis.navigator?.platform.includes("Mac") ? 86 : 8
 const INITIAL_TURN_COUNT = 5_000
 
 const activeId = ref("c1")
@@ -54,7 +53,7 @@ const feedback = ref<"up" | "down" | null>(null)
 const turns = ref<Turn[]>(expandTurns(INITIAL_TURN_COUNT))
 
 const transcriptRef = useElementRef()
-const window = useGpuiWindow()
+const gpuiWindow = useGpuiWindow()
 const title = computed(
   () => conversations.find((conversation) => conversation.id === activeId.value)?.title ?? "",
 )
@@ -246,10 +245,10 @@ function sendButtonStyle(): StyleDesc {
 async function sendDraft(event?: EventPayload): Promise<void> {
   const next = (event?.value ?? draft.value).trim()
   if (next.length === 0) return
-  turns.value.push({ kind: "user", text: next })
+  turns.value.push({ id: `user-${Date.now()}-${turns.value.length}`, kind: "user", text: next })
   draft.value = ""
   await nextTick()
-  if (transcriptRef.value !== null) window.scrollToItem(transcriptRef.value, turns.value.length)
+  if (transcriptRef.value !== null) gpuiWindow.scrollToItem(transcriptRef.value, turns.value.length)
 }
 </script>
 
@@ -570,7 +569,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
           </div>
         </div>
 
-        <div v-for="(turn, index) in turns" :key="index" :style="rowStyle(Number(index) + 1)">
+        <div v-for="(turn, index) in turns" :key="turn.id" :style="rowStyle(Number(index) + 1)">
           <div :style="rowInnerStyle">
             <div
               v-if="turn.kind === 'user'"

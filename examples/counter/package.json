@@ -11,13 +11,13 @@
   },
   "dependencies": {
     "gpui-vue": "workspace:^",
-    "vue": "^3.5.41"
+    "vue": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@vitejs/plugin-vue": "^6.0.3",
-    "typescript": "^5.9.3",
-    "vite": "^8.2.2",
-    "vue-tsc": "^3.2.0"
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vue-tsc": "catalog:"
   }
 }

@@ -9,17 +9,20 @@ declare module "@gpui-vue/wasm" {
     getCustomProp(id: number, key: string): string | undefined
     isInitialized(): boolean
     requiresTick(): boolean
+    supportsWindowEvents(): boolean
     tick(): boolean
     close(): void
     getWindowSizeJson(): string
     getWindowInsetsJson(): string
+    activateWindow(): void
     setWindowTitle(title: string): void
     focusElement(elementId: number): void
     blur(): void
     getSelectedText(): string | undefined
     clearSelection(): void
     scrollTo(elementId: number, x: number, y: number): void
-    scrollToItem(elementId: number, index: number): void
+    scrollToItem(elementId: number, index: number, offsetInItem?: number): void
+    getListScrollTopJson(elementId: number): string
     getScrollOffsetJson(elementId: number): string
     getAutomationTree(): string
     getElementBoundsJson(elementId: number): string

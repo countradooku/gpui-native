@@ -81,6 +81,9 @@ async function transformModule(sourcePath: string): Promise<void> {
 
   if (result.map) {
     result.map.file = basename(outputPath)
+    result.map.sources = result.map.sources.map(() =>
+      relative(dirname(outputPath), sourcePath).replaceAll("\\", "/"),
+    )
     await writeFile(`${outputPath}.map`, `${JSON.stringify(result.map)}\n`)
   }
 }

@@ -1,6 +1,6 @@
 //! `BlockTree` to gpui elements.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/markdown/render.rs`.
 //!
 //! Numbers drive layout (font sizes, line heights, paddings are all constants
@@ -12,13 +12,15 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    div, font, px, AnyElement, BorderStyle, FontStyle, FontWeight, Hsla, SharedString, TextRun,
-    UnderlineStyle, Window,
+    AnyElement, BorderStyle, FontStyle, FontWeight, Hsla, SharedString, TextRun, UnderlineStyle,
+    Window, div, font, px,
 };
 
 use super::parser::{Block, BlockTree, InlineRun, TableAlign};
+use crate::syntax::HighlightedDocument;
 use crate::syntax::cache::highlight_cached;
-use crate::text::{range_rects, runs::runs_for_spans, SharedSelection};
+use crate::text::paint::{LayoutWash, LinkCallback};
+use crate::text::{SharedSelection, range_rects, runs::runs_for_spans};
 use crate::theme::{Metrics, Theme};
 
 // ── Metrics ──────────────────────────────────────────────────────────
@@ -172,18 +174,56 @@ pub struct MdContext {
     next_sub: usize,
     /// Called with the URL of the link under a click. Hit testing happens per
     /// byte range inside the painted text, not per block.
-    pub on_link: Option<Arc<dyn Fn(&str)>>,
+    pub on_link: Option<LinkCallback>,
+    code_blocks: Arc<[PreparedCodeBlock]>,
+    next_code_block: usize,
+}
+
+#[derive(Clone)]
+pub struct PreparedCodeBlock {
+    lines: Arc<[SharedString]>,
+    highlight: Option<Arc<HighlightedDocument>>,
+}
+
+pub fn prepare_code_blocks(tree: &BlockTree) -> Arc<[PreparedCodeBlock]> {
+    fn collect(blocks: &[Block], output: &mut Vec<PreparedCodeBlock>) {
+        for block in blocks {
+            match block {
+                Block::CodeBlock { language, code } => output.push(PreparedCodeBlock {
+                    lines: code
+                        .split('\n')
+                        .map(SharedString::from)
+                        .collect::<Vec<_>>()
+                        .into(),
+                    highlight: highlight_cached(code, None, language.as_deref()),
+                }),
+                Block::BlockQuote { children } => collect(children, output),
+                Block::List { items, .. } => {
+                    for item in items {
+                        collect(item, output);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut prepared = Vec::new();
+    collect(&tree.blocks, &mut prepared);
+    prepared.into()
 }
 
 impl MdContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         element_id: u64,
         selection: SharedSelection,
         selectable: bool,
         selection_wash: Hsla,
         theme: Theme,
-        on_link: Option<Arc<dyn Fn(&str)>>,
+        on_link: Option<LinkCallback>,
         highlight_set: Option<Arc<crate::text::HighlightContext>>,
+        code_blocks: Arc<[PreparedCodeBlock]>,
     ) -> Self {
         Self {
             element_id,
@@ -194,6 +234,8 @@ impl MdContext {
             highlight_set,
             next_sub: 0,
             on_link,
+            code_blocks,
+            next_code_block: 0,
         }
     }
 
@@ -201,6 +243,12 @@ impl MdContext {
         let sub = self.next_sub;
         self.next_sub += 1;
         sub
+    }
+
+    fn take_code_block(&mut self) -> Option<PreparedCodeBlock> {
+        let prepared = self.code_blocks.get(self.next_code_block).cloned();
+        self.next_code_block += 1;
+        prepared
     }
 }
 
@@ -227,6 +275,10 @@ pub fn render_tree(tree: &BlockTree, ctx: &mut MdContext, window: &Window) -> An
         .into_any_element()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "markdown block variants form one exhaustive declarative rendering table"
+)]
 pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyElement {
     use gpui::prelude::*;
 
@@ -248,17 +300,17 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
         Block::BlockQuote { children } => div()
             // Accent-tinted quote: an indigo rail with a whisper of the same
             // hue behind it.
-            .border_l_2()
+            .border_l(px(m.md_quote_border_width))
             .border_color(opacity(theme.accent, 0.6))
             .bg(opacity(theme.accent, 0.05))
-            .rounded_tr(px(6.0))
-            .rounded_br(px(6.0))
-            .pl(px(12.0))
-            .pr(px(10.0))
-            .py(px(6.0))
+            .rounded_tr(px(m.md_quote_radius))
+            .rounded_br(px(m.md_quote_radius))
+            .pl(px(m.md_quote_padding_left))
+            .pr(px(m.md_quote_padding_right))
+            .py(px(m.md_quote_padding_y))
             .flex()
             .flex_col()
-            .gap(px(8.0))
+            .gap(px(m.md_quote_gap))
             .text_color(theme.text_muted)
             .children(
                 children
@@ -271,14 +323,14 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
             ordered_start,
             items,
         } => {
-            let mut list = div().flex().flex_col().gap(px(4.0));
+            let mut list = div().flex().flex_col().gap(px(m.md_list_gap));
             for (item_ix, item) in items.iter().enumerate() {
                 // Ordered numbers are accent-tinted text; unordered markers are
                 // a real 5px disc, because the glyph "•" reads too small at 14px.
                 let marker: AnyElement = match ordered_start {
                     Some(start) => div()
                         .flex_none()
-                        .min_w(px(18.0))
+                        .min_w(px(m.md_list_marker_width))
                         .text_size(px(m.md_text_size))
                         .line_height(px(m.md_line_height))
                         .text_color(opacity(theme.accent, 0.85))
@@ -289,16 +341,16 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
                         .into_any_element(),
                     None => div()
                         .flex_none()
-                        .min_w(px(18.0))
+                        .min_w(px(m.md_list_marker_width))
                         // Centre the disc on the first text line's cap band.
                         .h(px(m.md_line_height))
                         .flex()
                         .items_center()
                         .child(
                             div()
-                                .ml(px(1.0))
-                                .w(px(5.0))
-                                .h(px(5.0))
+                                .ml(px(m.md_list_marker_margin_left))
+                                .w(px(m.md_list_marker_size))
+                                .h(px(m.md_list_marker_size))
                                 .rounded_full()
                                 .bg(opacity(theme.accent, 0.85)),
                         )
@@ -309,15 +361,20 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
                     .map(|child| render_block(child, ctx, window))
                     .collect();
                 list = list.child(
-                    div().flex().flex_row().gap(px(8.0)).child(marker).child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .children(children),
-                    ),
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(m.md_list_row_gap))
+                        .child(marker)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(m.md_list_item_gap))
+                                .children(children),
+                        ),
                 );
             }
             list.into_any_element()
@@ -328,7 +385,7 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
             align,
         } => render_table(header, rows, align, ctx, window),
         Block::Rule => div()
-            .h(px(1.0))
+            .h(px(m.md_rule_height))
             .w_full()
             .bg(theme.border)
             .into_any_element(),
@@ -361,8 +418,7 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
     let code_ranges = flat.code_ranges.clone();
     let wash = ctx.theme.code_wash;
     let radius = ctx.theme.metrics.md_inline_code_radius;
-    let extra: Option<Box<dyn Fn(&gpui::TextLayout, &mut gpui::Window)>> = if code_ranges.is_empty()
-    {
+    let extra: Option<LayoutWash> = if code_ranges.is_empty() {
         None
     } else {
         Some(Box::new(move |layout, window| {
@@ -410,7 +466,15 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     let theme = ctx.theme.clone();
     let m = &theme.metrics;
     let mono = font(theme.font_mono.clone());
-    let highlight = highlight_cached(code, None, language);
+    let prepared = ctx.take_code_block().unwrap_or_else(|| PreparedCodeBlock {
+        lines: code
+            .split('\n')
+            .map(SharedString::from)
+            .collect::<Vec<_>>()
+            .into(),
+        highlight: highlight_cached(code, None, language),
+    });
+    let highlight = prepared.highlight;
 
     // overflow-x only works as a flex *row* viewport. A flex_col scroller
     // stretches each nowrap row to the card width, so the line never overflows
@@ -427,7 +491,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         .line_height(px(m.code_line_height))
         .whitespace_nowrap();
 
-    for (line_ix, line) in code.split('\n').enumerate() {
+    for (line_ix, line) in prepared.lines.iter().enumerate() {
         let spans: Vec<(Range<usize>, Hsla)> = highlight
             .as_ref()
             .and_then(|doc: &Arc<_>| doc.lines.get(line_ix))
@@ -451,7 +515,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
             ..crate::text::SelectableText::new(
                 ctx.element_id,
                 sub,
-                SharedString::from(line.to_string()),
+                line.clone(),
                 Some(runs),
                 ctx.selection.clone(),
                 ctx.selection_wash,
@@ -523,7 +587,7 @@ fn render_table(
     let all: Vec<&[Vec<InlineRun>]> = std::iter::once(header)
         .filter(|h| !h.is_empty())
         .map(|h| h as &[Vec<InlineRun>])
-        .chain(rows.iter().map(|r| r.as_slice()))
+        .chain(rows.iter().map(std::vec::Vec::as_slice))
         .collect();
     let cols = all.iter().map(|r| r.len()).max().unwrap_or(0);
     if cols == 0 {
@@ -599,10 +663,10 @@ fn render_table(
                 TableAlign::Center => cell.text_center(),
                 TableAlign::Right => cell.text_right(),
             };
-            if let Some(flat) = cell_flat {
-                if !flat.text.is_empty() {
-                    cell = cell.child(flat_text_element(flat, ctx));
-                }
+            if let Some(flat) = cell_flat
+                && !flat.text.is_empty()
+            {
+                cell = cell.child(flat_text_element(flat, ctx));
             }
             row_el = row_el.child(cell);
         }
@@ -642,6 +706,10 @@ fn hairline(theme: &Theme, alpha: f32) -> Hsla {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "markdown metric tests assert exact deterministic theme values"
+)]
 mod tests {
     use super::*;
     use crate::markdown::parser::InlineStyle;
@@ -720,8 +788,10 @@ mod tests {
 
     #[test]
     fn heading_sizes_follow_the_metrics_override() {
-        let mut m = Metrics::default();
-        m.md_heading_sizes = [40.0, 30.0, 20.0, 10.0];
+        let m = Metrics {
+            md_heading_sizes: [40.0, 30.0, 20.0, 10.0],
+            ..Metrics::default()
+        };
         assert_eq!(m.heading(1).0, 40.0);
         assert_eq!(m.heading(3).0, 20.0);
         // h4 through h6 all collapse onto the last tier.

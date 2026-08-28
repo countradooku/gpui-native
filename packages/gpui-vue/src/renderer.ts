@@ -13,13 +13,13 @@ import { MemoryNativeRenderer, type NativeRenderer } from "./native.js"
 import { createNodeOps, createPatchProp } from "./nodeOps.js"
 import { createGpuiRoot, type GpuiContainer, type GpuiNode } from "./nodes.js"
 
+const rendererOwners = new WeakMap<NativeRenderer, symbol>()
+
 export interface GpuiRendererHost {
   /** The caller-provided first-party Rust renderer (or memory renderer in tests). */
   readonly nativeRenderer: NativeRenderer
   /** Auto-batched renderer used by Vue and exposed to application composables. */
   readonly renderer: BatchingRenderer
-  /** Backward-compatible alias for `renderer`. */
-  readonly bridge: BatchingRenderer
   readonly root: GpuiContainer
   readonly vueRenderer: Renderer<GpuiContainer>
   readonly createApp: CreateAppFunction<GpuiContainer>
@@ -33,51 +33,72 @@ export interface GpuiRendererHost {
 export function createGpuiRenderer(
   nativeRenderer: NativeRenderer = new MemoryNativeRenderer(),
 ): GpuiRendererHost {
-  const renderer = wrapWithBatching(nativeRenderer)
-  let nextId = 0
-  const allocateId = (): number => ++nextId
-
-  // A native root div lets Vue fragments have multiple top-level host nodes.
-  const rootId = allocateId()
-  renderer.createElement(rootId, "div")
-  renderer.setStyle(rootId, { width: "100%", height: "100%" })
-  renderer.setRoot(rootId)
-  const root = createGpuiRoot(renderer, rootId)
-
-  const nodeOps = createNodeOps(renderer, allocateId)
-  const vueRenderer = createRenderer<GpuiNode, GpuiContainer>({
-    ...nodeOps,
-    patchProp: createPatchProp(renderer),
-  })
-
-  const render = (vnode: VNode | null, container = root): void => {
-    vueRenderer.render(vnode, container)
-    renderer.flushMutations()
+  if (rendererOwners.has(nativeRenderer)) {
+    throw new Error("A native GPUI renderer can only own one live Vue root")
   }
+  const owner = Symbol("gpui-vue-root")
+  rendererOwners.set(nativeRenderer, owner)
 
-  const mount = (component: Component, props?: Record<string, unknown>): App<GpuiContainer> => {
-    const app = vueRenderer.createApp(component, props)
-    app.provide(GpuiRendererKey, renderer)
-    app.mount(root)
-    renderer.flushMutations()
-    return app
-  }
+  try {
+    const renderer = wrapWithBatching(nativeRenderer)
+    let nextId = 0
+    const allocateId = (): number => ++nextId
 
-  return {
-    nativeRenderer,
-    renderer,
-    bridge: renderer,
-    root,
-    vueRenderer,
-    createApp: vueRenderer.createApp,
-    render,
-    mount,
-    flushMutations: () => renderer.flushMutations(),
-    destroy(): void {
-      vueRenderer.render(null, root)
+    // A native root div lets Vue fragments have multiple top-level host nodes.
+    const rootId = allocateId()
+    renderer.createElement(rootId, "div")
+    renderer.setStyle(rootId, { width: "100%", height: "100%" })
+    renderer.setRoot(rootId)
+    const root = createGpuiRoot(renderer, rootId)
+
+    const nodeOps = createNodeOps(renderer, allocateId)
+    const vueRenderer = createRenderer<GpuiNode, GpuiContainer>({
+      ...nodeOps,
+      patchProp: createPatchProp(renderer),
+    })
+
+    const render = (vnode: VNode | null, container = root): void => {
+      vueRenderer.render(vnode, container)
       renderer.flushMutations()
-      renderer.destroyElement(root.id)
+    }
+
+    const mount = (component: Component, props?: Record<string, unknown>): App<GpuiContainer> => {
+      const app = vueRenderer.createApp(component, props)
+      app.provide(GpuiRendererKey, renderer)
+      app.mount(root)
       renderer.flushMutations()
-    },
+      return app
+    }
+
+    let destroyed = false
+    return {
+      nativeRenderer,
+      renderer,
+      root,
+      vueRenderer,
+      createApp: vueRenderer.createApp,
+      render,
+      mount,
+      flushMutations: () => renderer.flushMutations(),
+      destroy(): void {
+        if (destroyed) return
+        let cleaned = false
+        try {
+          vueRenderer.render(null, root)
+          renderer.flushMutations()
+          renderer.destroyElement(root.id)
+          renderer.flushMutations()
+          cleaned = true
+          destroyed = true
+        } finally {
+          if (cleaned && rendererOwners.get(nativeRenderer) === owner) {
+            rendererOwners.delete(nativeRenderer)
+          }
+        }
+      },
+    }
+  } catch (error) {
+    if (rendererOwners.get(nativeRenderer) === owner) rendererOwners.delete(nativeRenderer)
+    throw error
   }
 }

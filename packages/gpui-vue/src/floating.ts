@@ -5,8 +5,10 @@ import {
   type FunctionalComponent,
   type Slots,
   type VNode,
+  type VNodeRef,
 } from "@vue/runtime-core"
 
+import type { GpuiPublicInstance } from "./nodes.js"
 import type { HostProps, StyleDesc } from "./types.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
@@ -19,6 +21,8 @@ export interface FloatingContentProps extends HostProps {
   align?: FloatingAlign
   alignOffset?: number
   collisionPadding?: number
+  /** Ref to the scrollable content div rather than the anchored wrapper. */
+  contentRef?: (element: GpuiPublicInstance | null) => void
 }
 
 export function resolveStyle<State>(
@@ -69,6 +73,7 @@ export const FloatingLayer: FunctionalComponent<FloatingContentProps> = (props, 
     align = "start",
     alignOffset = 0,
     collisionPadding = 8,
+    contentRef,
     style,
     ...contentProps
   } = props
@@ -93,6 +98,7 @@ export const FloatingLayer: FunctionalComponent<FloatingContentProps> = (props, 
         "div",
         {
           ...contentProps,
+          ...(contentRef === undefined ? {} : { ref: contentRef as VNodeRef }),
           style: mergeStyles({ backgroundColor: "#1a1a1a" }, style),
         },
         slots.default?.(),

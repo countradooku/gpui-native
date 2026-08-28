@@ -1,5 +1,12 @@
 //! Native keyframe, tween, and spring tracks resolved outside Vue.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    reason = "validated motion values cross JavaScript f64, GPUI f32, and duration/index boundaries"
+)]
+
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -469,7 +476,7 @@ fn resolve_keyframes(
             }
             result.sort_by(|left, right| left.at.total_cmp(&right.at));
             result.dedup_by(|left, right| {
-                if left.at == right.at {
+                if left.at.total_cmp(&right.at).is_eq() {
                     *left = right.clone();
                     true
                 } else {
@@ -499,7 +506,7 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
         ("left", style.left),
         ("borderRadius", style.border_radius),
     ] {
-        if value.is_some_and(|value| !value.is_finite() || value.abs() > f32::MAX as f64) {
+        if value.is_some_and(|value| !value.is_finite() || value.abs() > f64::from(f32::MAX)) {
             return Err(format!("motion {name} must fit a finite 32-bit float"));
         }
     }
@@ -596,14 +603,14 @@ fn cubic_bezier(x: f64, [x1, y1, x2, y2]: [f64; 4]) -> f64 {
     }
     let (mut low, mut high) = (0.0, 1.0);
     for _ in 0..20 {
-        let middle = (low + high) / 2.0;
+        let middle = f64::midpoint(low, high);
         if sample(middle, x1, x2) < x {
             low = middle;
         } else {
             high = middle;
         }
     }
-    sample((low + high) / 2.0, y1, y2).clamp(0.0, 1.0)
+    sample(f64::midpoint(low, high), y1, y2).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -710,19 +717,23 @@ mod tests {
         )
         .unwrap();
         assert!(!state.frame(started).active);
-        assert!(MotionState::new(
-            &serde_json::json!({
-                "initial": true, "animate": { "width": 1.0 }
-            }),
-            started
-        )
-        .is_err());
-        assert!(MotionState::new(
-            &serde_json::json!({
-                "animate": { "opacity": 2.0 }
-            }),
-            started
-        )
-        .is_err());
+        assert!(
+            MotionState::new(
+                &serde_json::json!({
+                    "initial": true, "animate": { "width": 1.0 }
+                }),
+                started
+            )
+            .is_err()
+        );
+        assert!(
+            MotionState::new(
+                &serde_json::json!({
+                    "animate": { "opacity": 2.0 }
+                }),
+                started
+            )
+            .is_err()
+        );
     }
 }

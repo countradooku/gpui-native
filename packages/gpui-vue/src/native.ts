@@ -39,17 +39,20 @@ export interface NativeRenderer {
   close?(): void
   isInitialized?(): boolean
   requiresTick?(): boolean
+  supportsWindowEvents?(): boolean
   tick?(): boolean
   getWindowSize?(): WindowSize
   getWindowInsets?(): NativeWindowInsets
+  activateWindow?(): void
   setWindowTitle?(title: string): void
   focusElement?(elementId: NativeNodeId): void
   blur?(): void
   getSelectedText?(): string | null
   clearSelection?(): void
   scrollTo?(elementId: NativeNodeId, x: number, y: number): void
-  scrollToItem?(elementId: NativeNodeId, index: number): void
+  scrollToItem?(elementId: NativeNodeId, index: number, offsetInItem?: number): void
   getScrollOffset?(elementId: NativeNodeId): number[] | null
+  getListScrollTop?(elementId: NativeNodeId): number[] | null
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   cycleDebugFrameOverlay?(): string
   getDebugFrameOverlay?(): string
@@ -59,6 +62,7 @@ export interface NativeRenderer {
   snapshotJson?(): string
   getElementBounds?(id: NativeNodeId): number[] | null
   getAllText?(): string[]
+  getRetainedElementCount?(): number
   getPaintedText?(): string[]
   getPaintedHighlights?(): HighlightMatch[]
   simulateKeystrokes?(keystrokes: string): void
@@ -92,9 +96,6 @@ export interface NativeRenderer {
   captureScreenshot?(path: string): void
 }
 
-/** Backward-compatible name retained from the bootstrap API. */
-export type NativeBridge = NativeRenderer
-
 export interface NativeSnapshotNode {
   id: NativeNodeId
   type: GpuiElementType | string
@@ -120,15 +121,22 @@ function parseJsonObject(value: string | object): Record<string, unknown> {
 /** A deterministic protocol implementation for unit tests and custom hosts. */
 export class MemoryNativeRenderer implements NativeRenderer {
   readonly nodes = new Map<NativeNodeId, NativeSnapshotNode>()
+
+  getRetainedElementCount(): number {
+    return this.nodes.size
+  }
   rootId: NativeNodeId | null = null
   commitCount = 0
   initialized = false
   windowSize: WindowSize = { width: 800, height: 600 }
   windowTitle = "gpui-vue"
+  windowVisible = true
+  windowActive = true
   focusedElementId: NativeNodeId | null = null
   selectedText: string | null = null
   debugFrameOverlay: DebugFrameOverlayMode = "hidden"
   readonly scrollOffsets = new Map<NativeNodeId, [number, number]>()
+  readonly listScrollTops = new Map<NativeNodeId, [number, number, number]>()
   timelineState: TimelineState = {
     currentTimeMs: 0,
     playbackRate: 1,
@@ -172,6 +180,7 @@ export class MemoryNativeRenderer implements NativeRenderer {
       for (const child of current.children) visit(child)
       this.nodes.delete(nodeId)
       this.scrollOffsets.delete(nodeId)
+      this.listScrollTops.delete(nodeId)
       destroyed.push(nodeId)
     }
     visit(id)
@@ -241,6 +250,8 @@ export class MemoryNativeRenderer implements NativeRenderer {
     for (const [id, node] of staged.nodes) this.nodes.set(id, node)
     this.scrollOffsets.clear()
     for (const [id, offset] of staged.scrollOffsets) this.scrollOffsets.set(id, offset)
+    this.listScrollTops.clear()
+    for (const [id, top] of staged.listScrollTops) this.listScrollTops.set(id, top)
     this.rootId = staged.rootId
     this.commitCount += 1
     return destroyed
@@ -300,11 +311,15 @@ export class MemoryNativeRenderer implements NativeRenderer {
     if (options?.width !== undefined) this.windowSize.width = options.width
     if (options?.height !== undefined) this.windowSize.height = options.height
     if (options?.title !== undefined) this.windowTitle = options.title
+    this.windowVisible = options?.show ?? true
+    this.windowActive = options?.focus ?? true
   }
 
   close(): void {
     this.initialized = false
     this.focusedElementId = null
+    this.windowVisible = false
+    this.windowActive = false
   }
 
   isInitialized(): boolean {
@@ -332,6 +347,11 @@ export class MemoryNativeRenderer implements NativeRenderer {
     this.windowTitle = title
   }
 
+  activateWindow(): void {
+    this.windowVisible = true
+    this.windowActive = true
+  }
+
   focusElement(elementId: NativeNodeId): void {
     this.#node(elementId)
     this.focusedElementId = elementId
@@ -354,14 +374,24 @@ export class MemoryNativeRenderer implements NativeRenderer {
     this.scrollOffsets.set(elementId, [x, y])
   }
 
-  scrollToItem(elementId: NativeNodeId, index: number): void {
-    this.#node(elementId)
+  scrollToItem(elementId: NativeNodeId, index: number, offsetInItem = 0): void {
+    const node = this.#node(elementId)
     this.scrollOffsets.set(elementId, [0, -index])
+    if (node.type === "virtual-list") {
+      const height = typeof node.style.height === "number" ? node.style.height : 0
+      this.listScrollTops.set(elementId, [index, offsetInItem, height])
+    }
   }
 
   getScrollOffset(elementId: NativeNodeId): number[] | null {
     const offset = this.scrollOffsets.get(elementId)
     return offset === undefined ? null : [...offset]
+  }
+
+  getListScrollTop(elementId: NativeNodeId): number[] | null {
+    this.#node(elementId)
+    const top = this.listScrollTops.get(elementId)
+    return top === undefined ? null : [...top]
   }
 
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string {
@@ -454,7 +484,12 @@ export class MemoryNativeRenderer implements NativeRenderer {
     if (samples.length % this.audioState.channels !== 0) {
       throw new RangeError("audio samples must contain complete interleaved frames")
     }
-    this.#audioSamples.push(...samples)
+    // Spreading a realistic Float32Array can exceed the engine's argument
+    // limit. Append in bounded chunks without materializing another full copy.
+    const chunkSize = 16_384
+    for (let offset = 0; offset < samples.length; offset += chunkSize) {
+      this.#audioSamples.push(...samples.subarray(offset, offset + chunkSize))
+    }
     const capacity = this.audioState.capacityFrames * this.audioState.channels
     if (this.#audioSamples.length > capacity) {
       const dropped = this.#audioSamples.length - capacity
@@ -513,20 +548,22 @@ export class MemoryNativeRenderer implements NativeRenderer {
   }
 
   getAutomationTree(): string {
-    const nodes: Record<string, Record<string, unknown>> = {}
-    for (const node of this.nodes.values()) {
-      nodes[String(node.id)] = {
+    if (this.rootId === null) return "null"
+    const visit = (id: NativeNodeId): Record<string, unknown> => {
+      const node = this.#node(id)
+      const testId = node.customProps.testId
+      return {
         id: node.id,
-        kind: node.type === "text" ? "text" : "element",
-        ...(node.type === "text" ? { text: node.text ?? "" } : { tag: node.type }),
-        parent: node.parentId,
-        children: [...node.children],
+        type: node.type,
+        ...(node.text === null ? {} : { text: node.text }),
+        ...(typeof testId === "string" ? { testId } : {}),
+        children: node.children.map(visit),
         style: { ...node.style },
         events: [...node.events],
         customProps: { ...node.customProps },
       }
     }
-    return JSON.stringify({ rootId: this.rootId, revision: this.commitCount, nodes })
+    return JSON.stringify(visit(this.rootId))
   }
 
   snapshotJson(): string {
@@ -560,6 +597,7 @@ export class MemoryNativeRenderer implements NativeRenderer {
       })
     }
     for (const [id, offset] of this.scrollOffsets) clone.scrollOffsets.set(id, [...offset])
+    for (const [id, top] of this.listScrollTops) clone.listScrollTops.set(id, [...top])
     return clone
   }
 
@@ -602,4 +640,3 @@ export class MemoryNativeRenderer implements NativeRenderer {
 }
 
 /** Backward-compatible class export retained from the bootstrap. */
-export const MemoryNativeBridge = MemoryNativeRenderer

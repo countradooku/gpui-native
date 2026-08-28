@@ -1,6 +1,6 @@
 //! `<diff>` — a virtualized, syntax-highlighted, selectable unified diff.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
+//! Ported from Comet (<https://github.com/zeronsh/comet>), MIT.
 //! Original: `crates/ui/src/changes.rs`.
 //!
 //! ```tsx
@@ -18,21 +18,26 @@
 //! so the closure can capture an `Rc` and build only visible rows. The default
 //! flow path renders the same rows in a column so a parent can be the scroller.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "validated diff props and bounded row indices narrow to native layout types"
+)]
+
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use gpui::{px, BorderStyle, Font, Hsla, SharedString};
+use gpui::{BorderStyle, Font, Hsla, SharedString, px};
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::diff::{
-    annotate_word_diffs, file_notices, flatten_rows, gutter_width, parse_patch, DiffLine, DiffRow,
-    FileDiff, LineKind,
+    DiffLine, DiffRow, FileDiff, LineKind, annotate_word_diffs, file_notices, flatten_rows,
+    gutter_width, parse_patch,
 };
 use crate::renderer::emit_event_full;
-use crate::syntax::cache::highlight_cached;
 use crate::syntax::HighlightSpan;
+use crate::syntax::cache::highlight_cached;
 use crate::text::runs::runs_for_spans;
-use crate::text::{range_rects, SharedSelection};
+use crate::text::{SharedSelection, range_rects};
 use crate::theme::Theme;
 
 /// How far past the viewport the list pre-builds rows.
@@ -43,7 +48,7 @@ const OVERDRAW: f32 = 1024.0;
 pub struct DiffFactory;
 
 impl CustomElementFactory for DiffFactory {
-    fn element_type(&self) -> &str {
+    fn element_type(&self) -> &'static str {
         "diff"
     }
 
@@ -87,10 +92,7 @@ impl FileHighlight {
     /// Spans for one diff line. Context lines prefer the post-change side,
     /// which is what the reader is looking at.
     fn spans_for(&self, line: &DiffLine) -> &[HighlightSpan] {
-        fn pick<'a>(
-            lines: &'a [Vec<HighlightSpan>],
-            no: Option<u32>,
-        ) -> Option<&'a [HighlightSpan]> {
+        fn pick(lines: &[Vec<HighlightSpan>], no: Option<u32>) -> Option<&[HighlightSpan]> {
             let ix = no?.saturating_sub(1) as usize;
             lines.get(ix).map(Vec::as_slice)
         }
@@ -103,7 +105,6 @@ impl FileHighlight {
     }
 }
 
-#[derive(Default)]
 pub struct DiffElement {
     patch: String,
     show_word_diff: bool,
@@ -122,15 +123,32 @@ pub struct DiffElement {
     list_metrics: Option<u64>,
 }
 
+impl Default for DiffElement {
+    fn default() -> Self {
+        Self {
+            patch: String::new(),
+            show_word_diff: false,
+            scroll: true,
+            max_lines: None,
+            collapsed: HashSet::new(),
+            theme: Theme::default(),
+            data: None,
+            fingerprint: None,
+            list_state: None,
+            list_metrics: None,
+        }
+    }
+}
+
 impl DiffElement {
     /// Returns the data plus whether it was rebuilt, so the caller knows the
     /// list state's cached row measurements are now stale.
     fn rebuild_if_needed(&mut self) -> (Rc<DiffData>, bool) {
         let fingerprint = self.fingerprint_props();
-        if let (Some(data), Some(previous)) = (&self.data, self.fingerprint) {
-            if previous == fingerprint {
-                return (data.clone(), false);
-            }
+        if let (Some(data), Some(previous)) = (&self.data, self.fingerprint)
+            && previous == fingerprint
+        {
+            return (data.clone(), false);
         }
 
         let mut files = parse_patch(&self.patch);
@@ -233,12 +251,16 @@ fn highlight_side(visible: &[(u32, &str)], max_line: u32, path: &str) -> Vec<Vec
     let mut lines = vec![Vec::new(); max_line as usize];
     for ((number, _), spans) in visible.iter().zip(document.lines.iter()) {
         // `number` is 1-based and non-zero by construction above.
-        lines[*number as usize - 1] = spans.clone();
+        lines[*number as usize - 1].clone_from(spans);
     }
     lines
 }
 
 impl CustomElement for DiffElement {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the retained diff render path keeps cache invalidation and list construction together"
+    )]
     fn render(
         &mut self,
         ctx: CustomRenderContext,
@@ -252,20 +274,14 @@ impl CustomElement for DiffElement {
         let metrics = theme.metrics;
 
         if data.rows.is_empty() {
-            let mut empty = gpui::div()
-                .id(SharedString::from(format!(
-                    "__gpui_vue_diff_empty_{}",
-                    ctx.id
-                )))
+            let empty = gpui::div().id(super::custom_element_id("__gpui_vue_diff", ctx.id));
+            let empty = super::custom_surface(empty, &ctx)
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(12.0))
+                .text_size(px(metrics.diff_text_size))
                 .text_color(theme.text_faint)
-                .child(ctx.chrome_text("No changes", None));
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
+                .child(crate::text::chrome_text("No changes".into(), None));
             return empty.into_any_element();
         }
 
@@ -326,7 +342,7 @@ impl CustomElement for DiffElement {
                 render_row(
                     &row_data,
                     ix,
-                    RowContext {
+                    &RowContext {
                         element_id,
                         selection: &selection,
                         selectable,
@@ -352,7 +368,7 @@ impl CustomElement for DiffElement {
                 column = column.child(render_row(
                     &data,
                     ix,
-                    RowContext {
+                    &RowContext {
                         element_id,
                         selection: &selection,
                         selectable,
@@ -370,8 +386,8 @@ impl CustomElement for DiffElement {
             column.into_any_element()
         };
 
-        let mut container = gpui::div()
-            .id(SharedString::from(format!("__gpui_vue_diff_{}", ctx.id)))
+        let container = gpui::div().id(super::custom_element_id("__gpui_vue_diff", ctx.id));
+        let mut container = super::custom_surface(container, &ctx)
             .flex()
             .flex_col()
             .bg(theme.bg)
@@ -380,10 +396,6 @@ impl CustomElement for DiffElement {
             container = container.min_h_0();
         }
 
-        container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
         container.into_any_element()
     }
 
@@ -391,7 +403,7 @@ impl CustomElement for DiffElement {
         match key {
             "patch" => self.patch = value.as_str().unwrap_or("").to_string(),
             "wordDiff" => self.show_word_diff = value.as_bool().unwrap_or(false),
-            "scroll" => self.scroll = value.as_bool().unwrap_or(false),
+            "scroll" => self.scroll = value.as_bool().unwrap_or(true),
             "maxLines" => {
                 self.max_lines = value.as_u64().map(|n| n as usize);
             }
@@ -404,7 +416,7 @@ impl CustomElement for DiffElement {
                             .filter_map(|item| item.as_str().map(str::to_string))
                             .collect()
                     })
-                    .unwrap_or_default()
+                    .unwrap_or_default();
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
@@ -442,6 +454,10 @@ impl CustomElement for DiffElement {
 
 // ── Row rendering ────────────────────────────────────────────────────
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent event subscriptions are intentionally represented as explicit flags"
+)]
 struct RowContext<'a> {
     element_id: u64,
     selection: &'a SharedSelection,
@@ -475,7 +491,7 @@ impl RowContext<'_> {
         sub: usize,
         text: String,
         runs: Option<Vec<gpui::TextRun>>,
-        extra_wash: Option<Box<dyn Fn(&gpui::TextLayout, &mut gpui::Window)>>,
+        extra_wash: Option<crate::text::paint::LayoutWash>,
     ) -> gpui::AnyElement {
         // Content, not chrome: `userSelect: "none"` stops the drag, not the
         // find. `chrome_text` cannot paint a highlight wash, so it stays for
@@ -499,7 +515,7 @@ impl RowContext<'_> {
     }
 }
 
-fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
+fn render_row(data: &DiffData, ix: usize, ctx: &RowContext) -> gpui::AnyElement {
     use gpui::prelude::*;
 
     let Some(row) = data.rows.get(ix).copied() else {
@@ -513,7 +529,7 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
             let Some(file_diff) = data.files.get(file as usize) else {
                 return gpui::Empty.into_any_element();
             };
-            file_header_row(file_diff, ix, &ctx, theme, ix == 0)
+            file_header_row(file_diff, ix, ctx, theme, ix == 0)
         }
         DiffRow::Notice { file, notice } => {
             let text = data
@@ -528,7 +544,7 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
                 .flex()
                 .items_center()
                 .px(px(m.diff_row_padding_x))
-                .text_size(px(11.0))
+                .text_size(px(m.diff_chrome_text_size))
                 .text_color(theme.text_faint)
                 .child(crate::text::chrome_text(SharedString::from(text), None))
                 .into_any_element()
@@ -549,7 +565,7 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
                 .px(px(m.diff_row_padding_x))
                 .bg(theme.diff_hunk_bg)
                 .font_family(theme.font_mono.clone())
-                .text_size(px(11.0))
+                .text_size(px(m.diff_chrome_text_size))
                 .text_color(theme.text_faint)
                 .child(crate::text::chrome_text(SharedString::from(header), None))
                 .into_any_element()
@@ -569,15 +585,14 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
                 .highlights
                 .get(file as usize)
                 .and_then(|h| h.as_ref())
-                .map(|h| h.spans_for(diff_line))
-                .unwrap_or(&[]);
+                .map_or(&[] as &[HighlightSpan], |h| h.spans_for(diff_line));
             diff_line_row(
                 diff_line,
                 spans,
                 data.show_word_diff,
                 gutter_width(file_diff, m),
                 ix,
-                &ctx,
+                ctx,
                 theme,
             )
         }
@@ -585,7 +600,7 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
             .w_full()
             .h(px(m.diff_body_bottom_pad))
             .into_any_element(),
-        DiffRow::ShowMore { remaining } => show_more_row(remaining, ix, &ctx, theme),
+        DiffRow::ShowMore { remaining } => show_more_row(remaining, ix, ctx, theme),
     }
 }
 
@@ -644,8 +659,8 @@ fn file_header_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.0))
-        .px(px(12.0))
+        .gap(px(m.diff_header_gap))
+        .px(px(m.diff_header_padding_x))
         .bg(ink(theme, 0.025))
         .border_t_1()
         .border_color(ink(theme, 0.04))
@@ -674,7 +689,7 @@ fn file_header_row(
                 .min_w_0()
                 .overflow_hidden()
                 .font_family(theme.font_mono.clone())
-                .text_size(px(12.0))
+                .text_size(px(m.diff_text_size))
                 .text_color(theme.text_dim)
                 .child(crate::text::chrome_text(
                     SharedString::from(file.path.clone()),
@@ -685,7 +700,7 @@ fn file_header_row(
             gpui::div()
                 .flex_none()
                 .font_family(theme.font_mono.clone())
-                .text_size(px(11.0))
+                .text_size(px(m.diff_chrome_text_size))
                 .text_color(theme.diff_add)
                 .child(crate::text::chrome_text(
                     SharedString::from(format!("+{}", file.additions)),
@@ -696,7 +711,7 @@ fn file_header_row(
             gpui::div()
                 .flex_none()
                 .font_family(theme.font_mono.clone())
-                .text_size(px(11.0))
+                .text_size(px(m.diff_chrome_text_size))
                 .text_color(theme.diff_del)
                 // U+2212 MINUS SIGN, not a hyphen: it matches the plus sign's
                 // width and vertical position in a monospace face.
@@ -708,7 +723,11 @@ fn file_header_row(
         .into_any_element()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "a diff row is one linear paint specification with explicit visual inputs"
+)]
 fn diff_line_row(
     line: &DiffLine,
     highlight_spans: &[HighlightSpan],
@@ -731,8 +750,8 @@ fn diff_line_row(
             .pl(px(m.diff_accent_bar_width
                 + 2.0 * gutter_px
                 + m.diff_marker_width
-                + 12.0))
-            .text_size(px(10.5))
+                + m.diff_content_padding_left))
+            .text_size(px(m.diff_meta_text_size))
             .text_color(theme.text_faint)
             .italic()
             .child(crate::text::chrome_text(
@@ -777,11 +796,11 @@ fn diff_line_row(
             .w(px(gutter_px))
             .flex_none()
             .font_family(theme.font_mono.clone())
-            .text_size(px(11.0))
+            .text_size(px(m.diff_chrome_text_size))
             .text_color(color)
             .flex()
             .justify_end()
-            .pr(px(8.0))
+            .pr(px(m.diff_gutter_padding_right))
             .child(crate::text::chrome_text(
                 SharedString::from(no.map(|n| n.to_string()).unwrap_or_default()),
                 None,
@@ -797,9 +816,10 @@ fn diff_line_row(
 
     // Word-level wash: a rounded quad under only the tokens that changed. This
     // is what makes a one-character edit visible at a glance.
-    let word_wash: Option<Box<dyn Fn(&gpui::TextLayout, &mut gpui::Window)>> =
+    let word_wash: Option<crate::text::paint::LayoutWash> =
         if show_word_diff && !line.word_ranges.is_empty() {
             let ranges = line.word_ranges.clone();
+            let radius = m.diff_word_radius;
             let mut tint = match line.kind {
                 LineKind::Add => theme.diff_add,
                 _ => theme.diff_del,
@@ -810,7 +830,7 @@ fn diff_line_row(
                     for rect in range_rects(layout, range, 1.0, 1.5) {
                         window.paint_quad(gpui::quad(
                             rect,
-                            px(3.0),
+                            px(radius),
                             tint,
                             px(0.0),
                             gpui::transparent_black(),
@@ -896,7 +916,7 @@ fn diff_line_row(
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
-                .pl(px(12.0))
+                .pl(px(m.diff_content_padding_left))
                 .font_family(theme.font_mono.clone())
                 .text_size(px(m.diff_text_size))
                 .whitespace_nowrap()
@@ -914,4 +934,19 @@ fn opacity(mut color: Hsla, alpha: f32) -> Hsla {
 fn ink(theme: &Theme, alpha: f32) -> Hsla {
     let lightness = if theme.bg.l < 0.5 { 1.0 } else { 0.0 };
     gpui::hsla(0.0, 0.0, lightness, alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_scrolling_is_the_default_and_null_resets_it() {
+        let mut diff = DiffElement::default();
+        assert!(diff.scroll);
+        diff.set_prop("scroll", serde_json::Value::Bool(false));
+        assert!(!diff.scroll);
+        diff.set_prop("scroll", serde_json::Value::Null);
+        assert!(diff.scroll);
+    }
 }

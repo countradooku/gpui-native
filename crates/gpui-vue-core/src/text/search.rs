@@ -10,6 +10,11 @@
 //! Grouping is structural (same parent host element, adjacent children). It never
 //! reads `display`, which only knows `flex` and `grid` here anyway.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "bounded UTF-8 offsets and validated highlight metrics narrow to GPUI's u32/f32 types"
+)]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -26,6 +31,7 @@ use crate::retained_tree::RetainedTree;
 #[derive(Clone, Debug, PartialEq)]
 pub struct HighlightSpec {
     pub query: String,
+    folded_query: String,
     pub case_sensitive: bool,
     pub whole_word: bool,
     /// `[start, end)` in UTF-16 code units, indexing the declaring subtree's
@@ -109,18 +115,20 @@ impl HighlightSpec {
         // treating a malformed value as absent.
         let match_index_offset = match object.get("matchIndexOffset") {
             None | Some(serde_json::Value::Null) => 0,
-            Some(value) => match value.as_u64() {
-                Some(offset) => offset as usize,
-                None => {
+            Some(value) => {
+                if let Some(offset) = value.as_u64() {
+                    offset as usize
+                } else {
                     log::warn!(
                         "highlight matchIndexOffset must be a non-negative integer, got {value}"
                     );
                     return None;
                 }
-            },
+            }
         };
 
         let query = string("query").unwrap_or_default().to_string();
+        let folded_query = query.to_lowercase();
         let ranges = object
             .get("ranges")
             .and_then(serde_json::Value::as_array)
@@ -146,11 +154,12 @@ impl HighlightSpec {
         active.a = 0.65;
         Some(Self {
             query,
+            folded_query,
             case_sensitive: flag("caseSensitive"),
             whole_word: flag("wholeWord"),
             ranges,
-            color: color("color").map(Into::into).unwrap_or(base),
-            active_color: color("activeColor").map(Into::into).unwrap_or(active),
+            color: color("color").map_or(base, Into::into),
+            active_color: color("activeColor").map_or(active, Into::into),
             active_index: object
                 .get("activeIndex")
                 .and_then(serde_json::Value::as_u64)
@@ -159,8 +168,7 @@ impl HighlightSpec {
             radius: object
                 .get("radius")
                 .and_then(serde_json::Value::as_f64)
-                .map(|n| n as f32)
-                .unwrap_or(2.0),
+                .map_or(2.0, |n| n as f32),
         })
     }
 }
@@ -357,23 +365,45 @@ pub fn washes_for_retained_run(ctx: &HighlightContext, key: &Arc<str>) -> Vec<Wa
 /// document, which a natively generated string is not part of.
 pub fn washes_for_native_run(ctx: &HighlightContext, key: &Arc<str>, text: &str) -> Vec<Wash> {
     let mut out = Vec::new();
-    // Folding allocates, and a case-sensitive spec never reads it.
-    let folded = ctx
-        .set
-        .specs
-        .iter()
-        .any(|spec| !spec.case_sensitive && !spec.query.is_empty())
-        .then(|| fold(text));
-    let (folded, fold_map) = match &folded {
-        Some((folded, map)) => (folded.as_str(), map.as_slice()),
-        None => ("", [].as_slice()),
+    let cached = {
+        let cache = ctx.matches.native_cache.lock();
+        cache
+            .get(key)
+            .filter(|entry| &*entry.text == text)
+            .map(|entry| entry.by_spec.clone())
     };
+    let by_spec = cached.unwrap_or_else(|| {
+        // Folding allocates, and a case-sensitive set never reads it. The
+        // result is retained by stable selection key until the text changes.
+        let folded = ctx
+            .set
+            .specs
+            .iter()
+            .any(|spec| !spec.case_sensitive && !spec.query.is_empty())
+            .then(|| fold(text));
+        let (folded, fold_map) = match &folded {
+            Some((folded, map)) => (folded.as_str(), map.as_slice()),
+            None => ("", [].as_slice()),
+        };
+        let by_spec: Arc<Vec<Vec<Range<usize>>>> = Arc::new(
+            ctx.set
+                .specs
+                .iter()
+                .map(|spec| matches_in(text, folded, fold_map, spec))
+                .collect(),
+        );
+        ctx.matches.native_cache.lock().insert(
+            key.clone(),
+            NativeMatchCache {
+                text: Arc::from(text),
+                by_spec: by_spec.clone(),
+            },
+        );
+        by_spec
+    });
 
-    for (spec_index, spec) in ctx.set.specs.iter().enumerate() {
-        for (position, range) in matches_in(text, folded, fold_map, spec)
-            .into_iter()
-            .enumerate()
-        {
+    for (spec_index, (spec, ranges)) in ctx.set.specs.iter().zip(by_spec.iter()).enumerate() {
+        for (position, range) in ranges.iter().cloned().enumerate() {
             let id = MatchId::Native(key.clone(), position);
             out.push(wash(ctx, spec_index, spec, range, id));
         }
@@ -404,8 +434,7 @@ fn matches_in(
         }
         return out;
     }
-    let needle = spec.query.to_lowercase();
-    for (ix, hit) in folded.match_indices(needle.as_str()) {
+    for (ix, hit) in folded.match_indices(spec.folded_query.as_str()) {
         let (Some(&start), Some(&end)) = (fold_map.get(ix), fold_map.get(ix + hit.len())) else {
             continue;
         };
@@ -529,7 +558,7 @@ fn collect_into(tree: &RetainedTree, id: u64, is_root: bool, out: &mut Vec<Group
     {
         out.push(Group::new(
             vec![(crate::text::selection_key(id, 0), 0..content.len())],
-            content.clone(),
+            content.to_string(),
         ));
     }
 
@@ -583,8 +612,15 @@ struct MatchRef {
 #[derive(Debug, Default)]
 pub struct MatchSet {
     by_key: HashMap<Arc<str>, Vec<MatchRef>>,
+    native_cache: parking_lot::Mutex<HashMap<Arc<str>, NativeMatchCache>>,
     /// Matches found, counted once even when split across runs. Reported to JS.
     pub total: usize,
+}
+
+#[derive(Debug)]
+struct NativeMatchCache {
+    text: Arc<str>,
+    by_spec: Arc<Vec<Vec<Range<usize>>>>,
 }
 
 impl MatchSet {
@@ -700,6 +736,7 @@ mod tests {
     fn spec(query: &str) -> HighlightSpec {
         HighlightSpec {
             query: query.to_string(),
+            folded_query: query.to_lowercase(),
             case_sensitive: false,
             whole_word: false,
             ranges: Vec::new(),
@@ -833,10 +870,10 @@ mod tests {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "text".to_string());
-        tree.append_child(1, 2);
+        tree.append_child(1, 2).unwrap();
         for (id, text) in [(3, "Hello "), (4, "Tommy"), (5, "!")] {
             tree.create_element(id, "text".to_string());
-            tree.append_child(2, id);
+            tree.append_child(2, id).unwrap();
             tree.set_text(id, text.to_string());
         }
         tree
@@ -870,9 +907,9 @@ mod tests {
         tree.create_element(1, "div".to_string());
         for (wrapper, leaf, text) in [(2, 3, "quick "), (4, 5, "brown")] {
             tree.create_element(wrapper, "text".to_string());
-            tree.append_child(1, wrapper);
+            tree.append_child(1, wrapper).unwrap();
             tree.create_element(leaf, "text".to_string());
-            tree.append_child(wrapper, leaf);
+            tree.append_child(wrapper, leaf).unwrap();
             tree.set_text(leaf, text.to_string());
         }
         let groups = GroupList::collect(&tree, 1);
@@ -931,7 +968,7 @@ mod tests {
         tree.create_element(1, "text".to_string());
         for (id, kind) in [(2, "text"), (3, "div"), (4, "text")] {
             tree.create_element(id, kind.to_string());
-            tree.append_child(1, id);
+            tree.append_child(1, id).unwrap();
         }
         tree.set_text(2, "A".to_string());
         tree.set_text(4, "C".to_string());
@@ -1066,7 +1103,7 @@ mod tests {
         tree.create_element(1, "text".to_string());
         for (id, text) in [(2, "ab"), (3, "ab")] {
             tree.create_element(id, "text".to_string());
-            tree.append_child(1, id);
+            tree.append_child(1, id).unwrap();
             tree.set_text(id, text.to_string());
         }
         // "abab": matches at 0..2 and 2..4, the first split across both runs.
@@ -1113,10 +1150,12 @@ mod tests {
         s.match_index_offset = 50;
         s.active_index = Some(9);
         let ctx = context(&groups, HighlightSet { specs: vec![s] });
-        assert!(paint(&ctx, &groups)
-            .values()
-            .flatten()
-            .all(|wash| !wash.active));
+        assert!(
+            paint(&ctx, &groups)
+                .values()
+                .flatten()
+                .all(|wash| !wash.active)
+        );
     }
 
     /// One declaration is one element, not one allocation.

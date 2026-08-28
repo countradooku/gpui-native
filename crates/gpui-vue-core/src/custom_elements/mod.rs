@@ -6,11 +6,10 @@
 /// file with its own dependencies, cleanly separated from the core renderer.
 ///
 /// Architecture:
-///   build_element()
-///     "div"  → build_div()             (built-in)
-///     "text" → build_text()            (built-in)
-///     _      → registry.render(ctx)    (trait dispatch)
-use std::collections::{HashMap, HashSet};
+///   `build_element()`
+///     "div" | "text" → `build_host_container()` (built-in)
+///     _              → registry.render(ctx)       (trait dispatch)
+use std::collections::HashMap;
 
 use crate::renderer::EventCallback;
 
@@ -24,16 +23,16 @@ pub mod markdown;
 
 // ── Render context ───────────────────────────────────────────────────
 
-/// Context passed to CustomElement::render() with everything needed
+/// Context passed to `CustomElement::render()` with everything needed
 /// to build GPUI elements with events and focus.
 pub struct CustomRenderContext<'a> {
     /// Numeric element ID (matches Vue's instance ID).
     pub id: u64,
     /// Event types registered by Vue (e.g. "keyDown", "click").
-    pub events: &'a HashSet<String>,
+    pub events: &'a crate::retained_tree::EventSet,
     /// Callback for emitting events back to JS.
     pub event_callback: &'a Option<EventCallback>,
-    /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
+    /// Pre-created `FocusHandle` for this element (if it has keyboard/focus listeners).
     pub focus_handle: Option<&'a gpui::FocusHandle>,
     /// Style object from the retained element for layout and appearance.
     pub style: Option<&'a crate::style::StyleDesc>,
@@ -83,10 +82,15 @@ impl CustomRenderContext<'_> {
             )
         })
     }
+}
 
-    /// Chrome text: line numbers, language tags, file headers. Painted and
-    /// logged for tests, but never part of a selection, so copying a code block
-    /// yields code and not a column of line numbers.
+impl CustomRenderContext<'_> {
+    /// Paint test-visible chrome that is deliberately excluded from document
+    /// selection (line numbers, placeholders and headers).
+    #[allow(
+        clippy::unused_self,
+        reason = "keeps text helpers scoped to the render context"
+    )]
     pub fn chrome_text(
         &self,
         text: impl Into<gpui::SharedString>,
@@ -96,15 +100,83 @@ impl CustomRenderContext<'_> {
     }
 }
 
+/// Allocation-free identity for a retained custom-element root.
+pub(crate) fn custom_element_id(namespace: &'static str, id: u64) -> gpui::ElementId {
+    gpui::ElementId::NamedInteger(gpui::SharedString::new_static(namespace), id)
+}
+
+/// Apply the complete shared custom-element surface to a div root.
+pub(crate) fn custom_surface(
+    mut el: gpui::Stateful<gpui::Div>,
+    ctx: &CustomRenderContext,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+
+    if let Some(style) = ctx.style {
+        el = crate::renderer::apply_interactive_styles(el, style);
+    }
+    if ctx
+        .style
+        .and_then(crate::style::StyleDesc::resolved_position)
+        .is_none()
+    {
+        el = el.relative();
+    }
+    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
+    wire_standard_events(el, ctx)
+}
+
+/// Wire the click and hover events shared by leaf and container adapters.
+pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    ctx: &CustomRenderContext,
+) -> E {
+    let id = ctx.id;
+    for event in ctx.events.iter() {
+        let callback = ctx.event_callback.clone();
+        match event {
+            "click" => {
+                el = el.on_click(move |click, _window, _cx| {
+                    crate::renderer::emit_event_full(&callback, id, "click", |payload| {
+                        let (x, y) = crate::renderer::point_to_xy(click.position());
+                        payload.x = Some(x);
+                        payload.y = Some(y);
+                        payload.click_count =
+                            Some(u32::try_from(click.click_count()).unwrap_or(u32::MAX));
+                        payload.modifiers = Some(click.modifiers().into());
+                    });
+                });
+            }
+            "mouseEnter" | "mouseLeave"
+                if event == "mouseEnter" || !ctx.events.contains("mouseEnter") =>
+            {
+                let enter = ctx.events.contains("mouseEnter");
+                let leave = ctx.events.contains("mouseLeave");
+                let callback = ctx.event_callback.clone();
+                el = el.on_hover(move |&hovered, _window, _cx| {
+                    let event = if hovered { "mouseEnter" } else { "mouseLeave" };
+                    if (hovered && enter) || (!hovered && leave) {
+                        crate::renderer::emit_event_full(&callback, id, event, |payload| {
+                            payload.hovered = Some(hovered);
+                        });
+                    }
+                });
+            }
+            _ => {}
+        }
+    }
+    el
+}
+
 // ── Traits ───────────────────────────────────────────────────────────
 
 /// A custom element that renders native GPUI content.
 ///
 /// Lifecycle:
-///   1. Factory creates instance via CustomElementFactory::create()
+///   1. Factory creates instance via `CustomElementFactory::create()`
 ///   2. Registry synchronizes changed props and declared event capabilities
-///   3. Each GPUI frame calls render() → returns AnyElement
-///   4. Vue unmounts → destroy() for cleanup
+///   3. Each GPUI frame calls `render()` → returns `AnyElement`
+///   4. Vue unmounts → `destroy()` for cleanup
 pub trait CustomElement: 'static {
     /// Build GPUI elements for this frame.
     /// Called on every GPUI render cycle (immediate mode).
@@ -128,7 +200,7 @@ pub trait CustomElement: 'static {
     fn destroy(&mut self);
 }
 
-/// Factory for creating CustomElement instances.
+/// Factory for creating `CustomElement` instances.
 /// One factory per element type, registered at startup.
 pub trait CustomElementFactory: 'static {
     /// The element type name that Vue uses (e.g. "input", "editor", "diff").
@@ -151,10 +223,18 @@ impl CustomElementEntry {
     fn sync(&mut self, props: &HashMap<String, serde_json::Value>) {
         let supported_props = self.element.supported_props();
         for &key in supported_props {
-            let value = props.get(key).cloned().unwrap_or(serde_json::Value::Null);
-            if self.applied_props.get(key) != Some(&value) {
-                self.element.set_prop(key, value.clone());
-                self.applied_props.insert(key.to_string(), value);
+            match props.get(key) {
+                Some(value) if self.applied_props.get(key) == Some(value) => {}
+                Some(value) => {
+                    let value = value.clone();
+                    self.element.set_prop(key, value.clone());
+                    self.applied_props.insert(key.to_string(), value);
+                }
+                None if self.applied_props.contains_key(key) => {
+                    self.element.set_prop(key, serde_json::Value::Null);
+                    self.applied_props.remove(key);
+                }
+                None => {}
             }
         }
 
@@ -254,18 +334,13 @@ impl CustomElementRegistry {
             return gpui::Empty.into_any_element();
         };
 
+        debug_assert!(
+            ctx.events
+                .iter()
+                .all(|event| entry.element.supported_events().contains(&event)),
+            "{element_type} received an event its adapter does not report as supported"
+        );
         entry.sync(props);
-        let supported = entry.element.supported_events();
-        let filtered: HashSet<String> = ctx
-            .events
-            .iter()
-            .filter(|event| supported.contains(&event.as_str()))
-            .cloned()
-            .collect();
-        let ctx = CustomRenderContext {
-            events: &filtered,
-            ..ctx
-        };
         entry.element.render(ctx, window, cx)
     }
 
@@ -299,6 +374,10 @@ impl CustomElementRegistry {
     /// `Entity<TextEditorState>`. gpui's leak detector panics if any handle is
     /// still alive when the `App` drops, so the registry has to be emptied
     /// while the `App` is still there.
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "macos", target_os = "windows")
+    ))]
     pub fn destroy_all(&mut self) {
         let ids: Vec<u64> = self.instances.keys().copied().collect();
         for id in ids {

@@ -1,6 +1,6 @@
 //! Bounded interleaved-f32 audio queue for decoded-frame producers.
 //!
-//! The N-API surface accepts a Float32Array in one call per decoded chunk.
+//! The N-API surface accepts a `Float32Array` in one call per decoded chunk.
 //! Old data is dropped on overflow, which bounds memory and favors low latency.
 
 use std::collections::VecDeque;
@@ -45,7 +45,7 @@ impl AudioFrameQueue {
 
     pub fn push(&mut self, samples: &[f32]) -> Result<(), String> {
         let channels = self.channels as usize;
-        if samples.len() % channels != 0 {
+        if !samples.len().is_multiple_of(channels) {
             return Err(format!(
                 "audio sample count {} is not divisible by {} channels",
                 samples.len(),

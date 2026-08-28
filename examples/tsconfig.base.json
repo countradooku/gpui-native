@@ -3,6 +3,11 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "gpui-vue": ["../packages/gpui-vue/src/index.ts"],
+      "gpui-vue/*": ["../packages/gpui-vue/src/*.ts"]
+    },
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,

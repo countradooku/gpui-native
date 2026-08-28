@@ -23,10 +23,13 @@ bun run build:binaries
 Build the WebAssembly browser gallery for local static hosting:
 
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.127 --locked
+bun run setup:wasm
 bun run build:pages
 ```
+
+The checked-in Rust toolchain installs `rust-src` and
+`wasm32-unknown-unknown`. The Pages script scopes `RUSTC_BOOTSTRAP=1` to Cargo's
+Wasm-only `build-std` invocation.
 
 GitHub Pages publishes the same artifact at
 [countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/). The web gallery uses
