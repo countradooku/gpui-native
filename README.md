@@ -17,6 +17,18 @@ on all three platforms. The live WebAssembly example gallery deploys to
 [countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/) on
 every push to `main`.
 
+Two packages are published to npm:
+
+| npm package                                                            | Contents                                                          |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                   | The Vue 3 renderer, components, composables, and testing APIs     |
+| [`@gpui-native/core`](https://www.npmjs.com/package/@gpui-native/core) | Prebuilt N-API binaries for macOS (arm64), Linux x64, Windows x64 |
+
+The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
+for this runtime going forward: bindings for other frameworks and platforms
+(React, Solid, and eventually mobile hosts) will be published there as they
+land.
+
 ## Install
 
 ```bash
@@ -30,8 +42,8 @@ source with `bun --filter @gpui-native/core build` (see [Build](#build)).
 This is a Vue-only monorepo. It has no React or `react-reconciler` dependency:
 
 - `crates/gpui-vue-core` — retained tree, native GPUI renderer, window lifecycle, styles, events, text selection, motion, themes, automation, and native elements.
-- `packages/gpui-vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs.
-- `packages/gpui-vue-native` — N-API addon loader and platform package metadata.
+- `packages/gpui-vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `gpui-vue`.
+- `packages/gpui-vue-native` — N-API addon loader and prebuilt platform binaries. Published as `@gpui-native/core`.
 
 ```text
 Vue components
@@ -45,32 +57,46 @@ Native GPUI window
 
 ## Quick start
 
-```ts
-import { GpuiCode, GpuiInput, defineComponent, h, ref, render } from "gpui-vue"
+Write ordinary Vue single-file components — `<template>`, `<script setup>`,
+`v-model`, `v-if`/`v-for`, and event handlers all work — and they render into
+a native GPUI window instead of the DOM:
 
-const App = defineComponent({
-  setup() {
-    const source = ref("const answer = 42")
-    return () =>
-      h("div", { style: { padding: 24, gap: 12 } }, [
-        h(GpuiInput, {
-          modelValue: source.value,
-          "onUpdate:modelValue": (value: string) => {
-            source.value = value
-          },
-        }),
-        h(GpuiCode, {
-          code: source.value,
-          language: "typescript",
-          showLineNumbers: true,
-          style: { padding: 12, background: "#111827", borderRadius: 8 },
-        }),
-      ])
-  },
-})
+```vue
+<!-- App.vue -->
+<script setup lang="ts">
+import { GpuiCode, GpuiInput } from "gpui-vue"
+import { ref } from "vue"
+
+const source = ref("const answer = 42")
+</script>
+
+<template>
+  <div :style="{ padding: 24, gap: 12, flexDirection: 'column' }">
+    <GpuiInput v-model="source" placeholder="Type some TypeScript" />
+    <GpuiCode
+      :code="source"
+      language="typescript"
+      :showLineNumbers="true"
+      :style="{ padding: 12, background: '#111827', borderRadius: 8 }"
+    />
+  </div>
+</template>
+```
+
+```ts
+// main.ts
+import { render } from "gpui-vue"
+
+import App from "./App.vue"
 
 render(App, { title: "My Vue app", width: 800, height: 600 })
 ```
+
+Single-file components compile through the standard `@vitejs/plugin-vue`
+pipeline (see `vite.examples.config.mts` for a working config), and every
+example under [`examples/`](./examples) is written this way. Render functions
+and JSX work equally well — anywhere you would write `h("div", ...)` in a
+browser app, the same call renders a native element.
 
 `render()` owns one persistent native window and hot-remounts its Vue root. On Linux and Windows it keeps Node alive while GPUI's threaded window is open; closing the final window releases that handle. `resetRender()` unmounts Vue, destroys the retained tree, and closes the native event loop immediately.
 
