@@ -33,7 +33,7 @@ The checked-in Rust toolchain installs `rust-src` and
 Wasm-only `build-std` invocation.
 
 GitHub Pages publishes the same artifact at
-[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/). The web gallery uses
+[countradooku.github.io/gpui-native](https://countradooku.github.io/gpui-native/). The web gallery uses
 GPUI's single-threaded browser platform, so it does not depend on cross-origin-isolation headers.
 
 Each example build runs strict `vue-tsc` template checking and then compiles a

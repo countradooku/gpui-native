@@ -2,8 +2,8 @@
   "extends": "../examples/tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@gpui-native/vue": ["../packages/gpui-vue/src/web.ts"],
-      "@gpui-native/wasm": ["../packages/gpui-vue/src/wasm-bindings.d.ts"]
+      "@gpui-native/vue": ["../packages/vue/src/web.ts"],
+      "@gpui-native/wasm": ["../packages/vue/src/wasm-bindings.d.ts"]
     },
     "types": ["vite/client"]
   },

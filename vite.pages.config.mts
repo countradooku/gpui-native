@@ -5,7 +5,7 @@ import { defineConfig } from "vite"
 
 const repositoryRoot = import.meta.dirname
 const webRoot = resolve(repositoryRoot, "web")
-const pagesBase = process.env.GITHUB_ACTIONS === "true" ? "/gpui-vue/" : "/"
+const pagesBase = process.env.PAGES_BASE_PATH ?? "/"
 
 export default defineConfig({
   root: webRoot,
@@ -14,12 +14,12 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^gpui-vue$/,
-        replacement: resolve(repositoryRoot, "packages/gpui-vue/src/web.ts"),
+        find: /^(?:@gpui-native\/vue|gpui-vue)$/,
+        replacement: resolve(repositoryRoot, "packages/vue/src/web.ts"),
       },
       {
         find: "@gpui-native/wasm",
-        replacement: resolve(webRoot, "pkg/gpui_vue_core.js"),
+        replacement: resolve(webRoot, "pkg/gpui_core.js"),
       },
     ],
   },

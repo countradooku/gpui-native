@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "gpui-vue-monorepo",
+      "name": "gpui-native-monorepo",
       "devDependencies": {
         "@vitejs/plugin-vue": "catalog:",
         "oxc-transform": "^0.146.0",
@@ -117,7 +117,7 @@
         "vue-tsc": "catalog:",
       },
     },
-    "packages/gpui-vue": {
+    "packages/vue": {
       "name": "@gpui-native/vue",
       "version": "0.1.0",
       "dependencies": {
@@ -132,7 +132,7 @@
         "vitest": "^4.0.0",
       },
     },
-    "packages/gpui-vue-native": {
+    "packages/core": {
       "name": "@gpui-native/core",
       "version": "0.1.0",
       "devDependencies": {
@@ -163,9 +163,9 @@
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
 
-    "@gpui-native/core": ["@gpui-native/core@workspace:packages/gpui-vue-native"],
+    "@gpui-native/core": ["@gpui-native/core@workspace:packages/core"],
 
-    "@gpui-native/vue": ["@gpui-native/vue@workspace:packages/gpui-vue"],
+    "@gpui-native/vue": ["@gpui-native/vue@workspace:packages/vue"],
 
     "@gpui-vue/example-audio-buffer": ["@gpui-vue/example-audio-buffer@workspace:examples/audio-buffer"],
 

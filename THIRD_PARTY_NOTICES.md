@@ -2,7 +2,7 @@
 
 ## GPUix native renderer
 
-Portions of `crates/gpui-vue-core` are adapted from the native renderer in
+Portions of `crates/gpui-core` are adapted from the native renderer in
 [remorses/gpuix](https://github.com/remorses/gpuix), commit
 `b8bbff4ef0dc00dc24c3d3f3ca47818e1be15c69`.
 

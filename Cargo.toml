@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gpui-vue-core"]
+members = ["crates/gpui-core"]
 resolver = "2"
 
 [workspace.package]

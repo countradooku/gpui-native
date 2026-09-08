@@ -5,8 +5,8 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@gpui-native/vue": ["../packages/gpui-vue/src/index.ts"],
-      "gpui-vue/*": ["../packages/gpui-vue/src/*.ts"]
+      "@gpui-native/vue": ["../packages/vue/src/index.ts"],
+      "gpui-vue/*": ["../packages/vue/src/*.ts"]
     },
     "strict": true,
     "exactOptionalPropertyTypes": true,

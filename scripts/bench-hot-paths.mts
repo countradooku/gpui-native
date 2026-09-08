@@ -6,7 +6,7 @@ import {
   MemoryNativeRenderer,
   wrapWithBatching,
   type NativeRenderer,
-} from "../packages/gpui-vue/src/index.ts"
+} from "../packages/vue/src/index.ts"
 
 interface Measurement {
   name: string

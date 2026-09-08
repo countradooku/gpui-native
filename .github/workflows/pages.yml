@@ -44,11 +44,14 @@ jobs:
       - name: Install wasm-bindgen CLI
         run: bun run setup:wasm
 
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Build Pages artifact
         run: bun run build:pages
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

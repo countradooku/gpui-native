@@ -12,7 +12,7 @@ const loaders: Record<string, () => Promise<unknown>> = {
 
 async function start(): Promise<void> {
   if (example === undefined || loaders[example] === undefined) {
-    throw new Error(`Unknown gpui-vue example: ${example ?? "missing"}`)
+    throw new Error(`Unknown gpui-native example: ${example ?? "missing"}`)
   }
 
   await initGpuiWeb()

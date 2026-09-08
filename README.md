@@ -1,20 +1,20 @@
-# gpui-vue
+# GPUI Native
 
-[![CI](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml)
-[![GitHub Pages](https://github.com/countradooku/gpui-vue/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-vue/)
+[![CI](https://github.com/countradooku/gpui-native/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-native/actions/workflows/ci.yml)
+[![GitHub Pages](https://github.com/countradooku/gpui-native/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-native/)
 [![npm](https://img.shields.io/npm/v/@gpui-native/vue)](https://www.npmjs.com/package/@gpui-native/vue)
 
-Vue 3 bindings for [Zed's GPUI](https://gpui.rs/), implemented as a Vue custom renderer and a full native Rust component runtime.
+A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3 is the first supported framework adapter; React, Svelte, and other adapters are planned.
 
 ## Status
 
-gpui-vue is an early `0.1.x` release. Native rendering runs on Apple Silicon
+GPUI Native is an early `0.1.x` release. Native rendering runs on Apple Silicon
 macOS, x64 Linux (Wayland/X11), and x64 Windows, with a WebAssembly renderer
 backing the browser examples. Every commit passes the full quality gate —
 formatting, Oxlint, TypeScript, `vue-tsc`, clippy with warnings denied, and the
 JavaScript and Rust test suites — plus a native build and headless smoke test
 on all three platforms. The live WebAssembly example gallery deploys to
-[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/) on
+[countradooku.github.io/gpui-native](https://countradooku.github.io/gpui-native/) on
 every push to `main`.
 
 The published npm packages live under the `@gpui-native` org:
@@ -27,7 +27,7 @@ The published npm packages live under the `@gpui-native` org:
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
 for this runtime going forward: bindings for other frameworks and platforms
-(React, Solid, and eventually mobile hosts) will be published there as they
+(React, Svelte, Solid, and eventually mobile hosts) will be published there as they
 land.
 
 ## Install
@@ -40,11 +40,15 @@ bun add @gpui-native/vue   # or: npm install @gpui-native/vue
 for the three supported targets. On other platforms, build the addon from
 source with `bun --filter @gpui-native/core build` (see [Build](#build)).
 
-This is a Vue-only monorepo. It has no React or `react-reconciler` dependency:
+The engine and framework adapters have separate ownership:
 
-- `crates/gpui-vue-core` — retained tree, native GPUI renderer, window lifecycle, styles, events, text selection, motion, themes, automation, and native elements.
-- `packages/gpui-vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `@gpui-native/vue` (alias: `gpui-vue`).
-- `packages/gpui-vue-native` — N-API addon loader and prebuilt platform binaries. Published as `@gpui-native/core`.
+- `crates/gpui-core` — retained tree, native GPUI renderer, window lifecycle, styles, events, text selection, motion, themes, automation, and native elements.
+- `packages/vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `@gpui-native/vue` (alias: `gpui-vue`).
+- `packages/core` — framework-neutral N-API addon loader, generated ABI types, and prebuilt platform binaries. Published as `@gpui-native/core`.
+
+Future adapters belong in `packages/react`, `packages/svelte`, and similar directories.
+They consume the core directly rather than depending on `packages/vue`. See
+[the adapter architecture](docs/architecture.md) for the boundary and extension path.
 
 ```text
 Vue components
@@ -309,7 +313,9 @@ into a standalone executable under that example's `dist/` directory.
 `bun run build:pages` compiles the retained Rust renderer against GPUI's single-threaded browser
 platform, generates its `wasm-bindgen` browser bridge, and creates the example gallery under
 `dist-pages/`. The deployed gallery is available at
-[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/).
+[countradooku.github.io/gpui-native](https://countradooku.github.io/gpui-native/).
+The Pages workflow supplies the deployment base path from GitHub's Pages configuration.
+For a local build with the same URL prefix, run `PAGES_BASE_PATH=/gpui-native/ bun run build:pages`.
 
 Applications importing `gpui-vue/web` must alias the virtual
 `@gpui-native/wasm` module to their generated `wasm-bindgen` JavaScript file. For
@@ -318,7 +324,7 @@ Vite, the essential configuration is:
 ```ts
 resolve: {
   alias: {
-    "@gpui-native/wasm": resolve(projectRoot, "web/pkg/gpui_vue_core.js"),
+    "@gpui-native/wasm": resolve(projectRoot, "web/pkg/gpui_core.js"),
   },
 }
 ```
