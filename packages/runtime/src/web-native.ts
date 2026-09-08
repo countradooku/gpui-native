@@ -44,6 +44,24 @@ export class WebNativeRenderer extends MutationRenderer implements NativeRendere
     this.#onEvent = onEvent
   }
 
+  createCanvasSource(): number {
+    return this.#wasm.createCanvasSource()
+  }
+  presentCanvasFrame(
+    id: number,
+    width: number,
+    height: number,
+    stride: number,
+    pixels: Uint8Array,
+    bgra: boolean,
+    opaque: boolean,
+  ): void {
+    this.#wasm.presentCanvasFrame(id, width, height, stride, pixels, bgra, opaque)
+  }
+  destroyCanvasSource(id: number): void {
+    this.#wasm.destroyCanvasSource(id)
+  }
+
   getCustomProp(id: NativeNodeId, key: string): string | null {
     return this.#wasm.getCustomProp(id, key) ?? null
   }

@@ -3,6 +3,17 @@ declare module "@gpui-native/wasm" {
 
   export class WebGpuiRenderer {
     constructor()
+    createCanvasSource(): number
+    presentCanvasFrame(
+      id: number,
+      width: number,
+      height: number,
+      stride: number,
+      pixels: Uint8Array,
+      bgra: boolean,
+      opaque: boolean,
+    ): void
+    destroyCanvasSource(id: number): void
     init(optionsJson: string): void
     applyBatch(mutationsJson: string): Float64Array
     commitMutations(): void

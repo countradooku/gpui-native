@@ -28,16 +28,27 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:webgpu": "node --import tsx test/native-webgpu.mts",
+    "bench:webgpu": "node --import tsx test/bench-webgpu.mts"
   },
   "dependencies": {
     "@gpui-native/core": "workspace:^",
+    "@webgpu/types": "^0.1.72",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/three": "^0.185.0",
+    "pngjs": "^7.0.0",
+    "three": "0.185.1",
+    "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"
+  },
+  "optionalDependencies": {
+    "webgpu": "0.6.0"
   }
 }

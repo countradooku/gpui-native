@@ -378,3 +378,10 @@ The native engine pins the Zed/GPUI revision whose embedded-window, selectable-t
 ## Attribution
 
 The full native component engine is adapted from GPUix's Apache-2.0 native package. Some upstream native subsystems derive from MIT-licensed Comet. Source details and license texts are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md), [`LICENSES/Apache-2.0.txt`](./LICENSES/Apache-2.0.txt), and [`LICENSES/Comet-MIT.txt`](./LICENSES/Comet-MIT.txt). The Vue renderer, component API, state model, composables, automation client/protocol implementation, and examples are gpui-vue code.
+
+### WebGPU canvas
+
+React and Vue can display real WebGPU rendering through a shared canvas source, with
+WGSL, compute, texture uploads, cube maps, MSAA, and Three.js coverage. See the
+[WebGPU guide](docs/webgpu.md) for runnable examples, lifecycle rules, measured
+readback costs, and current Node/browser requirements.

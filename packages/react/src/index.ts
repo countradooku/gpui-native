@@ -16,3 +16,5 @@ export * from "./select.js"
 export * from "./combobox.js"
 export * from "./automation.js"
 export * from "./testing.js"
+
+export * from "./webgpu.js"

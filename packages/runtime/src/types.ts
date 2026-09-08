@@ -495,6 +495,8 @@ export type CanvasCommand =
 
 /** Retained GPU drawing. Commands are tessellated only when this prop changes. */
 export interface CanvasProps extends HostProps {
+  /** Renderer-owned GPU canvas source. Commands paint above this image. */
+  source?: number | undefined
   commands?: readonly CanvasCommand[]
 }
 

@@ -50,6 +50,14 @@
     "./tooltip": {
       "types": "./dist/tooltip.d.ts",
       "import": "./dist/tooltip.js"
+    },
+    "./webgpu": {
+      "types": "./dist/webgpu.d.ts",
+      "import": "./dist/webgpu.js"
+    },
+    "./webgpu-native": {
+      "types": "./dist/webgpu-native.d.ts",
+      "import": "./dist/webgpu-native.js"
     }
   },
   "scripts": {

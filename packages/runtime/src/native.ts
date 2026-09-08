@@ -17,6 +17,17 @@ export type NativeEventCallback = (error: Error | null, event: EventPayload | nu
 
 /** First-party mutation protocol implemented by the Rust `GpuiRenderer`. */
 export interface NativeRenderer {
+  createCanvasSource?(): number
+  presentCanvasFrame?(
+    id: number,
+    width: number,
+    height: number,
+    stride: number,
+    pixels: Uint8Array,
+    bgra: boolean,
+    opaque: boolean,
+  ): void
+  destroyCanvasSource?(id: number): void
   createElement(id: NativeNodeId, elementType: string): void
   destroyElement(id: NativeNodeId): NativeNodeId[]
   appendChild(parentId: NativeNodeId, childId: NativeNodeId): void

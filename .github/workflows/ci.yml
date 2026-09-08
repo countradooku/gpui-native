@@ -199,6 +199,20 @@ jobs:
       - name: Load and exercise native binding
         run: bun run test:native
 
+      - name: Setup Node for Dawn WebGPU
+        if: contains(matrix.settings.target, 'linux')
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install software Vulkan driver for WebGPU smoke
+        if: contains(matrix.settings.target, 'linux')
+        run: sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Exercise WebGPU compute and canvas transport
+        if: contains(matrix.settings.target, 'linux')
+        run: bun run test:webgpu
+
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')

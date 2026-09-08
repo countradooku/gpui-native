@@ -17,6 +17,7 @@ futures = "0.3"
 gpui = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false, features = [
   "profiler",
 ] }
+image = { version = "0.25", default-features = false }
 log = "0.4"
 parking_lot = "0.12"
 pulldown-cmark = { version = "0.12", default-features = false }

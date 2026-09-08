@@ -34,13 +34,15 @@
     "check": "bun run typecheck && bun run lint && bun run format:check && cargo fmt --all -- --check && cargo clippy --workspace --all-features --all-targets -- -D warnings && cargo check --workspace --all-features",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint --vue-plugin --deny-warnings packages/runtime/src packages/react/src packages/react/test packages/vue/src packages/vue/test examples web scripts vite.react-examples.config.mts vite.examples.config.mts vite.pages.config.mts",
+    "lint": "oxlint --vue-plugin --deny-warnings packages/runtime/src packages/runtime/test packages/react/src packages/react/test packages/vue/src packages/vue/test examples web scripts vite.react-examples.config.mts vite.examples.config.mts vite.pages.config.mts",
     "lint:fix": "oxlint --vue-plugin --fix packages/runtime/src packages/react/src packages/react/test packages/vue/src packages/vue/test examples web scripts vite.react-examples.config.mts vite.examples.config.mts vite.pages.config.mts",
     "setup:wasm": "bun run scripts/install-wasm-bindgen.mts",
-    "test": "bun run build:adapters && bun --filter @gpui-native/vue test && bun --filter @gpui-native/react test && cargo test --workspace --all-features",
+    "test": "bun run build:adapters && bun --filter @gpui-native/runtime test && bun --filter @gpui-native/vue test && bun --filter @gpui-native/react test && cargo test --workspace --all-features",
     "test:native": "bun run build:adapters && bun run scripts/native-smoke.mts && bun packages/vue/test/native-upstream.mts && bun packages/react/test/native-smoke.tsx",
     "typecheck": "bun run build:adapters && bun --filter @gpui-native/runtime typecheck && bun --filter @gpui-native/react typecheck && bun --filter @gpui-native/vue typecheck && bun --filter '@gpui-*/example-*' typecheck && bun packages/vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json",
-    "build:adapters": "bun --filter @gpui-native/runtime build && bun --filter @gpui-native/vue build && bun --filter @gpui-native/react build"
+    "build:adapters": "bun --filter @gpui-native/runtime build && bun --filter @gpui-native/vue build && bun --filter @gpui-native/react build",
+    "test:webgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:webgpu",
+    "bench:webgpu": "bun --filter @gpui-native/runtime bench:webgpu"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "catalog:",

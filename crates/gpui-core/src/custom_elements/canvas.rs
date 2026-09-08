@@ -160,6 +160,7 @@ struct TranslatedPaintCache {
 #[derive(Default)]
 pub struct CanvasElement {
     source: serde_json::Value,
+    gpu_source: Option<u32>,
     paint_items: Arc<[PaintItem]>,
     source_revision: u64,
     translated: Arc<Mutex<TranslatedPaintCache>>,
@@ -195,12 +196,27 @@ impl CustomElement for CanvasElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
+        let gpu_source = self.gpu_source;
+        let canvas_frames = ctx.canvas_frames.clone();
         let paint_items = self.paint_items.clone();
         let source_revision = self.source_revision;
         let translated_cache = self.translated.clone();
         let drawing = gpui::canvas(
             |_, _, _| (),
             move |bounds, (), window, _| {
+                let image = gpu_source.and_then(|id| canvas_frames.lock().image(id));
+                if let Some(image) = image
+                    && let Err(error) = window.paint_image(
+                        bounds,
+                        bounds,
+                        gpui::Corners::default(),
+                        image,
+                        0,
+                        false,
+                    )
+                {
+                    log::warn!("canvas paint failed: {error}");
+                }
                 let translated = {
                     let mut cache = translated_cache.lock();
                     if cache.origin != Some(bounds.origin)
@@ -412,13 +428,15 @@ impl CustomElement for CanvasElement {
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
-        if key == "commands" {
+        if key == "source" {
+            self.gpu_source = value.as_u64().and_then(|id| u32::try_from(id).ok());
+        } else if key == "commands" {
             self.set_commands(value);
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["commands"]
+        &["commands", "source"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
@@ -439,6 +457,7 @@ impl CustomElement for CanvasElement {
     }
 
     fn destroy(&mut self) {
+        self.gpu_source = None;
         self.paint_items = Arc::default();
         self.translated.lock().items = Arc::default();
     }

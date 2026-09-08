@@ -2,6 +2,8 @@ import { initGpuiWeb } from "@gpui-native/vue"
 
 const example = document.body.dataset.example
 const loaders: Record<string, () => Promise<unknown>> = {
+  "react-webgpu": () => import("../../examples/react-webgpu/src/web.js"),
+  webgpu: () => import("../../examples/webgpu/src/web.js"),
   "react-counter": () => import("../../examples/react-counter/src/main.js"),
   "react-showcase": () => import("../../examples/react-showcase/src/main.js"),
   "react-multiple-windows": () => import("../../examples/react-multiple-windows/src/main.js"),

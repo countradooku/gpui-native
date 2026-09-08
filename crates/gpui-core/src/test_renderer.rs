@@ -344,6 +344,46 @@ impl TestGpuiRenderer {
             .map(|v| serde_json::to_string(v).unwrap_or_default()))
     }
 
+    #[napi]
+    pub fn create_canvas_source(&self) -> Result<u32> {
+        self.tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .create()
+            .map_err(Error::from_reason)
+    }
+
+    #[napi]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "flat binary frame signature shared by N-API and Wasm avoids JSON metadata in the presentation path"
+    )]
+    pub fn present_canvas_frame(
+        &self,
+        id: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: Uint8Array,
+        bgra: bool,
+        opaque: bool,
+    ) -> Result<()> {
+        let image =
+            crate::gpu_canvas::decode_frame(width, height, stride, pixels.as_ref(), bgra, opaque)
+                .map_err(Error::from_reason)?;
+        let frames = self.tree.lock().canvas_frames.clone();
+        frames
+            .lock()
+            .publish_image(id, image)
+            .map_err(Error::from_reason)
+    }
+
+    #[napi]
+    pub fn destroy_canvas_source(&self, id: u32) {
+        self.tree.lock().canvas_frames.lock().destroy(id);
+    }
+
     /// Signal that a batch of mutations is complete.
     /// In tests, this is a no-op — `flush()` handles the actual re-render.
     #[napi]

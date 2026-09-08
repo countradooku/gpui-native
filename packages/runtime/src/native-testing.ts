@@ -113,6 +113,28 @@ export class TestRenderer extends MutationRenderer implements NativeRenderer {
     return this.#native.getCustomProp?.(id, key) ?? null
   }
 
+  createCanvasSource(): number {
+    if (!this.#native.createCanvasSource)
+      throw new Error("Rebuild the native test renderer for GPU canvas support")
+    return this.#native.createCanvasSource()
+  }
+  presentCanvasFrame(
+    id: number,
+    width: number,
+    height: number,
+    stride: number,
+    pixels: Uint8Array,
+    bgra: boolean,
+    opaque: boolean,
+  ): void {
+    if (!this.#native.presentCanvasFrame)
+      throw new Error("Rebuild the native test renderer for GPU canvas support")
+    this.#native.presentCanvasFrame(id, width, height, stride, pixels, bgra, opaque)
+  }
+  destroyCanvasSource(id: number): void {
+    this.#native.destroyCanvasSource?.(id)
+  }
+
   commitMutations(): void {
     this.#native.commitMutations()
     this.commitCount += 1

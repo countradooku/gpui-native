@@ -42,6 +42,36 @@ impl WebGpuiRenderer {
         }
     }
 
+    #[wasm_bindgen(js_name = createCanvasSource)]
+    pub fn create_canvas_source(&self) -> Result<u32, JsValue> {
+        self.inner.create_canvas_source().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = presentCanvasFrame)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "flat binary frame signature shared by N-API and Wasm avoids JSON metadata in the presentation path"
+    )]
+    pub fn present_canvas_frame(
+        &self,
+        id: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: &[u8],
+        bgra: bool,
+        opaque: bool,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .present_canvas_slice(id, width, height, stride, pixels, bgra, opaque)
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = destroyCanvasSource)]
+    pub fn destroy_canvas_source(&self, id: u32) -> Result<(), JsValue> {
+        self.inner.destroy_canvas_source(id).map_err(js_error)
+    }
+
     pub fn init(&self, options_json: &str) -> Result<(), JsValue> {
         let options = serde_json::from_str::<WindowOptions>(options_json).map_err(js_error)?;
         self.inner.init(Some(options)).map_err(js_error)

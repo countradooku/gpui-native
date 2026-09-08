@@ -36,6 +36,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(webRoot, "index.html"),
+        "react-webgpu": resolve(webRoot, "examples/react-webgpu/index.html"),
+        webgpu: resolve(webRoot, "examples/webgpu/index.html"),
         "react-counter": resolve(webRoot, "examples/react-counter/index.html"),
         "react-showcase": resolve(webRoot, "examples/react-showcase/index.html"),
         "react-multiple-windows": resolve(webRoot, "examples/react-multiple-windows/index.html"),
