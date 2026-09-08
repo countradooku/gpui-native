@@ -2,6 +2,10 @@ import { initGpuiWeb } from "@gpui-native/vue"
 
 const example = document.body.dataset.example
 const loaders: Record<string, () => Promise<unknown>> = {
+  "react-counter": () => import("../../examples/react-counter/src/main.js"),
+  "react-showcase": () => import("../../examples/react-showcase/src/main.js"),
+  "react-multiple-windows": () => import("../../examples/react-multiple-windows/src/main.js"),
+
   "audio-buffer": () => import("../../examples/audio-buffer/src/main.js"),
   canvas: () => import("../../examples/canvas/src/main.js"),
   counter: () => import("../../examples/counter/src/main.js"),

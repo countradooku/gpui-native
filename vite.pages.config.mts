@@ -14,6 +14,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^@gpui-native\/react$/,
+        replacement: resolve(repositoryRoot, "packages/react/src/web.ts"),
+      },
+      {
         find: /^(?:@gpui-native\/vue|gpui-vue)$/,
         replacement: resolve(repositoryRoot, "packages/vue/src/web.ts"),
       },
@@ -32,6 +36,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(webRoot, "index.html"),
+        "react-counter": resolve(webRoot, "examples/react-counter/index.html"),
+        "react-showcase": resolve(webRoot, "examples/react-showcase/index.html"),
+        "react-multiple-windows": resolve(webRoot, "examples/react-multiple-windows/index.html"),
         counter: resolve(webRoot, "examples/counter/index.html"),
         canvas: resolve(webRoot, "examples/canvas/index.html"),
         "market-stream": resolve(webRoot, "examples/market-stream/index.html"),

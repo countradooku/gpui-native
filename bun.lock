@@ -117,12 +117,79 @@
         "vue-tsc": "catalog:",
       },
     },
-    "packages/vue": {
-      "name": "@gpui-native/vue",
+    "examples/react-counter": {
+      "name": "@gpui-react/example-counter",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gpui-native/react": "workspace:^",
+        "react": "^19.2.0",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@types/react": "^19.2.0",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
+    "examples/react-multiple-windows": {
+      "name": "@gpui-react/example-multiple-windows",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gpui-native/react": "workspace:^",
+        "react": "^19.2.0",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@types/react": "^19.2.0",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
+    "examples/react-showcase": {
+      "name": "@gpui-react/example-showcase",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gpui-native/react": "workspace:^",
+        "react": "^19.2.0",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@types/react": "^19.2.0",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
+    "packages/core": {
+      "name": "@gpui-native/core",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@napi-rs/cli": "^3.1.3",
+      },
+    },
+    "packages/react": {
+      "name": "@gpui-native/react",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gpui-native/runtime": "workspace:^",
+        "react-reconciler": "0.33.0",
+      },
+      "devDependencies": {
+        "@types/node": "^24.0.0",
+        "@types/react": "^19.2.0",
+        "@types/react-reconciler": "^0.33.0",
+        "react": "^19.2.0",
+        "typescript": "^5.9.3",
+        "vitest": "^4.0.0",
+      },
+      "peerDependencies": {
+        "react": "^19.2.0",
+      },
+    },
+    "packages/runtime": {
+      "name": "@gpui-native/runtime",
       "version": "0.1.0",
       "dependencies": {
         "@gpui-native/core": "workspace:^",
-        "@vue/runtime-core": "^3.5.41",
         "eventsource-parser": "^4.1.0",
         "zod": "^4.4.3",
       },
@@ -132,11 +199,20 @@
         "vitest": "^4.0.0",
       },
     },
-    "packages/core": {
-      "name": "@gpui-native/core",
+    "packages/vue": {
+      "name": "@gpui-native/vue",
       "version": "0.1.0",
+      "dependencies": {
+        "@gpui-native/core": "workspace:^",
+        "@gpui-native/runtime": "workspace:^",
+        "@vue/runtime-core": "^3.5.41",
+        "eventsource-parser": "^4.1.0",
+        "zod": "^4.4.3",
+      },
       "devDependencies": {
-        "@napi-rs/cli": "^3.1.3",
+        "@types/node": "^24.0.0",
+        "typescript": "^5.9.3",
+        "vitest": "^4.0.0",
       },
     },
   },
@@ -165,7 +241,17 @@
 
     "@gpui-native/core": ["@gpui-native/core@workspace:packages/core"],
 
+    "@gpui-native/react": ["@gpui-native/react@workspace:packages/react"],
+
+    "@gpui-native/runtime": ["@gpui-native/runtime@workspace:packages/runtime"],
+
     "@gpui-native/vue": ["@gpui-native/vue@workspace:packages/vue"],
+
+    "@gpui-react/example-counter": ["@gpui-react/example-counter@workspace:examples/react-counter"],
+
+    "@gpui-react/example-multiple-windows": ["@gpui-react/example-multiple-windows@workspace:examples/react-multiple-windows"],
+
+    "@gpui-react/example-showcase": ["@gpui-react/example-showcase@workspace:examples/react-showcase"],
 
     "@gpui-vue/example-audio-buffer": ["@gpui-vue/example-audio-buffer@workspace:examples/audio-buffer"],
 
@@ -503,6 +589,10 @@
 
     "@types/node": ["@types/node@24.13.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q=="],
 
+    "@types/react": ["@types/react@19.2.18", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w=="],
+
+    "@types/react-reconciler": ["@types/react-reconciler@0.33.0", "", { "peerDependencies": { "@types/react": "*" } }, "sha512-HZOXsKT0tGI9LlUw2LuedXsVeB88wFa536vVL0M6vE8zN63nI+sSr1ByxmPToP5K5bukaVscyeCJcF9guVNJ1g=="],
+
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@6.0.8", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0", "vue": "^3.2.25" } }, "sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew=="],
 
     "@vitest/expect": ["@vitest/expect@4.1.11", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@types/chai": "^5.2.2", "@vitest/spy": "4.1.11", "@vitest/utils": "4.1.11", "chai": "^6.2.2", "tinyrainbow": "^3.1.0" } }, "sha512-VX2x5vNJXET47KAFzwERI+KRMtTTCSWTfSMKsW7JsUsXV4psq++e3DvZpuTDOpHcxytiDs6p2nhVb2tVDiiUYw=="],
@@ -653,9 +743,15 @@
 
     "postcss": ["postcss@8.5.26", "", { "dependencies": { "nanoid": "^3.3.17", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ=="],
 
+    "react": ["react@19.2.8", "", {}, "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw=="],
+
+    "react-reconciler": ["react-reconciler@0.33.0", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.0" } }, "sha512-KetWRytFv1epdpJc3J4G75I4WrplZE5jOL7Yq0p34+OVOKF4Se7WrdIdVC45XsSSmUTlht2FM/fM1FZb1mfQeA=="],
+
     "rolldown": ["rolldown@1.2.5", "", { "dependencies": { "@oxc-project/types": "=0.146.0", "@rolldown/pluginutils": "^1.0.0" }, "optionalDependencies": { "@rolldown/binding-android-arm-eabi": "1.2.5", "@rolldown/binding-android-arm64": "1.2.5", "@rolldown/binding-darwin-arm64": "1.2.5", "@rolldown/binding-darwin-x64": "1.2.5", "@rolldown/binding-freebsd-x64": "1.2.5", "@rolldown/binding-linux-arm-gnueabihf": "1.2.5", "@rolldown/binding-linux-arm64-gnu": "1.2.5", "@rolldown/binding-linux-arm64-musl": "1.2.5", "@rolldown/binding-linux-ppc64-gnu": "1.2.5", "@rolldown/binding-linux-s390x-gnu": "1.2.5", "@rolldown/binding-linux-x64-gnu": "1.2.5", "@rolldown/binding-linux-x64-musl": "1.2.5", "@rolldown/binding-openharmony-arm64": "1.2.5", "@rolldown/binding-win32-arm64-msvc": "1.2.5", "@rolldown/binding-win32-x64-msvc": "1.2.5" }, "bin": { "rolldown": "./bin/cli.mjs" } }, "sha512-VD2IE5PUG4Oj8zz2VGykiYd5wbnjdIiSsNQb8Qu5B+noEp+A78mu2iVvpp27g8es14Tk9rofNs5Tku9iQCS4fA=="],
 
     "safer-buffer": ["safer-buffer@2.1.2", "", {}, "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="],
+
+    "scheduler": ["scheduler@0.27.0", "", {}, "sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q=="],
 
     "semver": ["semver@7.8.5", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA=="],
 

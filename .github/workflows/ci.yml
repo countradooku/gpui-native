@@ -66,8 +66,8 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
-      - name: Build Vue examples with Vite and Oxc
-        run: bun --filter '@gpui-vue/example-*' build
+      - name: Build Vue and React examples with Vite and Oxc
+        run: bun --filter '@gpui-*/example-*' build
 
       - name: Check WebAssembly renderer
         run: cargo check --target wasm32-unknown-unknown --package gpui-core --no-default-features
@@ -193,8 +193,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1 libwayland-client0 libxkbcommon-x11-0 libx11-xcb1 libvulkan1
 
-      - name: Build Vue package
-        run: bun --filter @gpui-native/vue build
+      - name: Build shared runtime and framework adapters
+        run: bun run build:adapters
 
       - name: Load and exercise native binding
         run: bun run test:native
@@ -242,7 +242,7 @@ jobs:
 
       - name: Verify tag matches package versions
         run: |
-          for pkg in packages/vue packages/core; do
+          for pkg in packages/vue packages/react packages/runtime packages/core; do
             version=$(bun -e "console.log(require('./$pkg/package.json').version)")
             if [ "v$version" != "$GITHUB_REF_NAME" ]; then
               echo "Tag $GITHUB_REF_NAME does not match $pkg version $version"
@@ -257,11 +257,23 @@ jobs:
           path: packages/core
           merge-multiple: true
 
-      - name: Build Vue package
-        run: bun --filter @gpui-native/vue build
+      - name: Build shared runtime and framework adapters
+        run: bun run build:adapters
 
       - name: Publish @gpui-native/core
         working-directory: packages/core
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @gpui-native/runtime
+        working-directory: packages/runtime
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @gpui-native/react
+        working-directory: packages/react
         run: bun publish --access public
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

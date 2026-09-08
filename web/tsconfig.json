@@ -5,7 +5,8 @@
       "@gpui-native/vue": ["../packages/vue/src/web.ts"],
       "@gpui-native/wasm": ["../packages/vue/src/wasm-bindings.d.ts"]
     },
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "jsxImportSource": "@gpui-native/react"
   },
   "include": ["src/**/*.ts"]
 }

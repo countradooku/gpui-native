@@ -59,6 +59,7 @@
   },
   "dependencies": {
     "@gpui-native/core": "workspace:^",
+    "@gpui-native/runtime": "workspace:^",
     "@vue/runtime-core": "^3.5.41",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
