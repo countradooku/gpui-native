@@ -138,7 +138,7 @@ jobs:
         shell: bash
 
       - name: Build native binding
-        run: bun --filter @gpui-vue/native ${{ matrix.settings.script }} --target ${{ matrix.settings.target }}
+        run: bun --filter @gpui-native/core ${{ matrix.settings.script }} --target ${{ matrix.settings.target }}
         shell: bash
 
       # macOS and Windows include the target-only GPU test renderer, so their
@@ -260,7 +260,7 @@ jobs:
       - name: Build Vue package
         run: bun --filter gpui-vue build
 
-      - name: Publish @gpui-vue/native
+      - name: Publish @gpui-native/core
         working-directory: packages/gpui-vue-native
         run: bun publish --access public
         env:

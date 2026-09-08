@@ -9,7 +9,7 @@ import type {
   WindowInsets as GeneratedWindowInsets,
   WindowOptions as GeneratedWindowOptions,
   WindowSize as GeneratedWindowSize,
-} from "@gpui-vue/native"
+} from "@gpui-native/core"
 import type { VNodeRef } from "@vue/runtime-core"
 
 /** Native ABI types are generated from the Rust N-API surface. */

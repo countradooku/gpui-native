@@ -58,7 +58,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gpui-vue/native": "workspace:^",
+    "@gpui-native/core": "workspace:^",
     "@vue/runtime-core": "^3.5.41",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"

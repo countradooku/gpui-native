@@ -23,9 +23,9 @@ every push to `main`.
 bun add gpui-vue   # or: npm install gpui-vue
 ```
 
-`gpui-vue` depends on `@gpui-vue/native`, which ships prebuilt N-API binaries
+`gpui-vue` depends on `@gpui-native/core`, which ships prebuilt N-API binaries
 for the three supported targets. On other platforms, build the addon from
-source with `bun --filter @gpui-vue/native build` (see [Build](#build)).
+source with `bun --filter @gpui-native/core build` (see [Build](#build)).
 
 This is a Vue-only monorepo. It has no React or `react-reconciler` dependency:
 
@@ -285,13 +285,13 @@ platform, generates its `wasm-bindgen` browser bridge, and creates the example g
 [countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/).
 
 Applications importing `gpui-vue/web` must alias the virtual
-`@gpui-vue/wasm` module to their generated `wasm-bindgen` JavaScript file. For
+`@gpui-native/wasm` module to their generated `wasm-bindgen` JavaScript file. For
 Vite, the essential configuration is:
 
 ```ts
 resolve: {
   alias: {
-    "@gpui-vue/wasm": resolve(projectRoot, "web/pkg/gpui_vue_core.js"),
+    "@gpui-native/wasm": resolve(projectRoot, "web/pkg/gpui_vue_core.js"),
   },
 }
 ```
@@ -305,7 +305,7 @@ CI runs formatting, clippy with warnings denied, Oxc, Vue, TypeScript, and Rust
 checks plus one native target per OS:
 Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
 `v0.1.0` creates a GitHub Release containing those bindings and publishes
-`gpui-vue` and `@gpui-vue/native` to npm after each platform passes its
+`gpui-vue` and `@gpui-native/core` to npm after each platform passes its
 headless native smoke test and the generated declaration file is checked for
 drift. Publishing requires an `NPM_TOKEN` repository secret with publish
 access to both packages.

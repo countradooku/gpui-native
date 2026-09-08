@@ -28,7 +28,7 @@
   "scripts": {
     "build": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build",
     "build:binaries": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build:binary",
-    "build:native": "bun --filter @gpui-vue/native build",
+    "build:native": "bun --filter @gpui-native/core build",
     "build:pages": "bun run scripts/build-pages.mts",
     "bench": "bun run scripts/bench-hot-paths.mts && cargo run --release -p gpui-vue-core --example bench_hot_paths",
     "check": "bun run typecheck && bun run lint && bun run format:check && cargo fmt --all -- --check && cargo clippy --workspace --all-features --all-targets -- -D warnings && cargo check --workspace --all-features",

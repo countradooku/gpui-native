@@ -1,6 +1,6 @@
 import { createRequire } from "node:module"
 
-import type { GpuiRenderer as NativeGpuiRenderer } from "@gpui-vue/native"
+import type { GpuiRenderer as NativeGpuiRenderer } from "@gpui-native/core"
 
 import { handleGpuiEvent } from "./events.js"
 import type { NativeEventCallback, NativeRenderer } from "./native.js"
@@ -46,7 +46,7 @@ function adaptNativeRenderer(native: NativeGpuiRenderer): NativeRenderer {
 export function loadNativeModule(): NativeModule {
   if (nativeModule !== undefined) return nativeModule
   const require = createRequire(import.meta.url)
-  nativeModule = require("@gpui-vue/native") as NativeModule
+  nativeModule = require("@gpui-native/core") as NativeModule
   return nativeModule
 }
 
