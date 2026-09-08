@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml)
 [![GitHub Pages](https://github.com/countradooku/gpui-vue/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-vue/)
-[![npm](https://img.shields.io/npm/v/gpui-vue)](https://www.npmjs.com/package/gpui-vue)
+[![npm](https://img.shields.io/npm/v/@gpui-native/vue)](https://www.npmjs.com/package/@gpui-native/vue)
 
 Vue 3 bindings for [Zed's GPUI](https://gpui.rs/), implemented as a Vue custom renderer and a full native Rust component runtime.
 
@@ -17,12 +17,13 @@ on all three platforms. The live WebAssembly example gallery deploys to
 [countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/) on
 every push to `main`.
 
-Two packages are published to npm:
+The published npm packages live under the `@gpui-native` org:
 
 | npm package                                                            | Contents                                                          |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                   | The Vue 3 renderer, components, composables, and testing APIs     |
+| [`@gpui-native/vue`](https://www.npmjs.com/package/@gpui-native/vue)   | The Vue 3 renderer, components, composables, and testing APIs     |
 | [`@gpui-native/core`](https://www.npmjs.com/package/@gpui-native/core) | Prebuilt N-API binaries for macOS (arm64), Linux x64, Windows x64 |
+| [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                   | Alias of `@gpui-native/vue` kept for the shorter name             |
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
 for this runtime going forward: bindings for other frameworks and platforms
@@ -32,17 +33,17 @@ land.
 ## Install
 
 ```bash
-bun add gpui-vue   # or: npm install gpui-vue
+bun add @gpui-native/vue   # or: npm install @gpui-native/vue
 ```
 
-`gpui-vue` depends on `@gpui-native/core`, which ships prebuilt N-API binaries
+`@gpui-native/vue` depends on `@gpui-native/core`, which ships prebuilt N-API binaries
 for the three supported targets. On other platforms, build the addon from
 source with `bun --filter @gpui-native/core build` (see [Build](#build)).
 
 This is a Vue-only monorepo. It has no React or `react-reconciler` dependency:
 
 - `crates/gpui-vue-core` — retained tree, native GPUI renderer, window lifecycle, styles, events, text selection, motion, themes, automation, and native elements.
-- `packages/gpui-vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `gpui-vue`.
+- `packages/gpui-vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `@gpui-native/vue` (alias: `gpui-vue`).
 - `packages/gpui-vue-native` — N-API addon loader and prebuilt platform binaries. Published as `@gpui-native/core`.
 
 ```text
@@ -64,7 +65,7 @@ a native GPUI window instead of the DOM:
 ```vue
 <!-- App.vue -->
 <script setup lang="ts">
-import { GpuiCode, GpuiInput } from "gpui-vue"
+import { GpuiCode, GpuiInput } from "@gpui-native/vue"
 import { ref } from "vue"
 
 const source = ref("const answer = 42")
@@ -85,7 +86,7 @@ const source = ref("const answer = 42")
 
 ```ts
 // main.ts
-import { render } from "gpui-vue"
+import { render } from "@gpui-native/vue"
 
 import App from "./App.vue"
 

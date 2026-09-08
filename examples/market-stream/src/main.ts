@@ -1,4 +1,4 @@
-import { render } from "gpui-vue"
+import { render } from "@gpui-native/vue"
 
 import App from "./App.vue"
 

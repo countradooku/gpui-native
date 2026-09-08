@@ -26,8 +26,8 @@
     }
   },
   "scripts": {
-    "build": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build",
-    "build:binaries": "bun run build:native && bun --filter gpui-vue build && bun --filter '@gpui-vue/example-*' build:binary",
+    "build": "bun run build:native && bun --filter @gpui-native/vue build && bun --filter '@gpui-vue/example-*' build",
+    "build:binaries": "bun run build:native && bun --filter @gpui-native/vue build && bun --filter '@gpui-vue/example-*' build:binary",
     "build:native": "bun --filter @gpui-native/core build",
     "build:pages": "bun run scripts/build-pages.mts",
     "bench": "bun run scripts/bench-hot-paths.mts && cargo run --release -p gpui-vue-core --example bench_hot_paths",
@@ -37,9 +37,9 @@
     "lint": "oxlint --vue-plugin --deny-warnings packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
     "lint:fix": "oxlint --vue-plugin --fix packages/gpui-vue/src packages/gpui-vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
     "setup:wasm": "bun run scripts/install-wasm-bindgen.mts",
-    "test": "bun --filter gpui-vue test && cargo test --workspace --all-features",
+    "test": "bun --filter @gpui-native/vue test && cargo test --workspace --all-features",
     "test:native": "bun run scripts/native-smoke.mts",
-    "typecheck": "bun --filter gpui-vue typecheck && bun --filter '@gpui-vue/example-*' typecheck && bun packages/gpui-vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
+    "typecheck": "bun --filter @gpui-native/vue typecheck && bun --filter '@gpui-vue/example-*' typecheck && bun packages/gpui-vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "catalog:",

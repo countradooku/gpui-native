@@ -9,7 +9,7 @@ import {
   type CanvasCommand,
   type EventPayload,
   type StyleDesc,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 import { generateMarket, mixEntropy, sectors, venues, type MarketRow } from "./data.js"

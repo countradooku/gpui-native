@@ -1,5 +1,5 @@
 {
-  "name": "gpui-vue",
+  "name": "@gpui-native/vue",
   "version": "0.1.0",
   "description": "Vue 3 custom renderer bindings for Zed's GPUI",
   "homepage": "https://github.com/countradooku/gpui-vue#readme",

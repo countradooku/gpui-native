@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { StyleDesc } from "gpui-vue"
+import type { StyleDesc } from "@gpui-native/vue"
 
 import { inspectorOpen, sharedCount } from "./state.js"
 import { closeInspector, openInspector } from "./windows.js"

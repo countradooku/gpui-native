@@ -16,7 +16,7 @@
       "name": "@gpui-vue/example-audio-buffer",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -31,7 +31,7 @@
       "name": "@gpui-vue/example-canvas",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -46,7 +46,7 @@
       "name": "@gpui-vue/example-chat",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -61,7 +61,7 @@
       "name": "@gpui-vue/example-counter",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -76,7 +76,7 @@
       "name": "@gpui-vue/example-market-stream",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -91,7 +91,7 @@
       "name": "@gpui-vue/example-motion-timeline",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -106,7 +106,7 @@
       "name": "@gpui-vue/example-multiple-windows",
       "version": "0.1.0",
       "dependencies": {
-        "gpui-vue": "workspace:^",
+        "@gpui-native/vue": "workspace:^",
         "vue": "catalog:",
       },
       "devDependencies": {
@@ -118,7 +118,7 @@
       },
     },
     "packages/gpui-vue": {
-      "name": "gpui-vue",
+      "name": "@gpui-native/vue",
       "version": "0.1.0",
       "dependencies": {
         "@gpui-native/core": "workspace:^",
@@ -164,6 +164,8 @@
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
 
     "@gpui-native/core": ["@gpui-native/core@workspace:packages/gpui-vue-native"],
+
+    "@gpui-native/vue": ["@gpui-native/vue@workspace:packages/gpui-vue"],
 
     "@gpui-vue/example-audio-buffer": ["@gpui-vue/example-audio-buffer@workspace:examples/audio-buffer"],
 
@@ -577,7 +579,7 @@
 
     "es-toolkit": ["es-toolkit@1.51.0", "", {}, "sha512-zC2lQGkM7QX+Gm6iM3+WIdZJzthsEd14LvRNJneSO2hzyz/zNBENR8+YXWo1cKxgPBtV6ksPYHELbcwBRzmdCw=="],
 
-    "estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
+    "estree-walker": ["estree-walker@3.0.3", "", { "dependencies": { "@types/estree": "^1.0.0" } }, "sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g=="],
 
     "eventsource-parser": ["eventsource-parser@4.1.0", "", {}, "sha512-+DHvQ1wLO//MK+1OZgcuXCbZFKgu3YjKPJt7n98rxX8vezL0ni+7s3ZQiM8bJkUEOk7MsuCycrPLj0FzUNf7Og=="],
 
@@ -592,8 +594,6 @@
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
-
-    "gpui-vue": ["gpui-vue@workspace:packages/gpui-vue"],
 
     "iconv-lite": ["iconv-lite@0.7.3", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ=="],
 
@@ -717,7 +717,9 @@
 
     "@octokit/plugin-rest-endpoint-methods/@octokit/types": ["@octokit/types@16.0.0", "", { "dependencies": { "@octokit/openapi-types": "^27.0.0" } }, "sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg=="],
 
-    "@vitest/mocker/estree-walker": ["estree-walker@3.0.3", "", { "dependencies": { "@types/estree": "^1.0.0" } }, "sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g=="],
+    "@vue/compiler-core/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
+
+    "@vue/compiler-sfc/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 
     "@napi-rs/lzma-wasm32-wasi/@emnapi/core/@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA=="],
 

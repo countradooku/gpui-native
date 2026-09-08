@@ -1,4 +1,4 @@
-import { createWindow } from "gpui-vue"
+import { createWindow } from "@gpui-native/vue"
 
 import ControllerApp from "./ControllerApp.vue"
 import { openInspector } from "./windows.js"

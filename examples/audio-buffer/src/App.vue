@@ -5,7 +5,7 @@ import {
   type AudioBufferState,
   type CanvasCommand,
   type StyleDesc,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 const SAMPLE_RATE = 48_000

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GpuiSvg, type StyleDesc } from "gpui-vue"
+import { GpuiSvg, type StyleDesc } from "@gpui-native/vue"
 import { computed } from "vue"
 
 import { icons, type IconName } from "./icons.js"

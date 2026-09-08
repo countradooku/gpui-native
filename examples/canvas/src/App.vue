@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GpuiCanvas, type CanvasCommand, type EventPayload, type StyleDesc } from "gpui-vue"
+import { GpuiCanvas, type CanvasCommand, type EventPayload, type StyleDesc } from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 const colors = {

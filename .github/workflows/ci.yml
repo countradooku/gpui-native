@@ -194,7 +194,7 @@ jobs:
           sudo apt-get install -y libfontconfig1 libwayland-client0 libxkbcommon-x11-0 libx11-xcb1 libvulkan1
 
       - name: Build Vue package
-        run: bun --filter gpui-vue build
+        run: bun --filter @gpui-native/vue build
 
       - name: Load and exercise native binding
         run: bun run test:native
@@ -258,7 +258,7 @@ jobs:
           merge-multiple: true
 
       - name: Build Vue package
-        run: bun --filter gpui-vue build
+        run: bun --filter @gpui-native/vue build
 
       - name: Publish @gpui-native/core
         working-directory: packages/gpui-vue-native
@@ -266,8 +266,17 @@ jobs:
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish gpui-vue
+      - name: Publish @gpui-native/vue
         working-directory: packages/gpui-vue
         run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # gpui-vue is a same-content alias of @gpui-native/vue.
+      - name: Publish gpui-vue alias
+        working-directory: packages/gpui-vue
+        run: |
+          bun -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); pkg.name = 'gpui-vue'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')"
+          bun publish --access public
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { StyleDesc } from "gpui-vue"
+import type { StyleDesc } from "@gpui-native/vue"
 
 import { sharedCount } from "./state.js"
 
