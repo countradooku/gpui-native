@@ -4,6 +4,7 @@ import type { GpuiRenderer as NativeGpuiRenderer } from "@gpui-native/core"
 
 import { handleGpuiEvent } from "./events.js"
 import type { NativeEventCallback, NativeRenderer } from "./native.js"
+import { reportRuntimeError } from "./runtime-errors.js"
 import type { EventPayload } from "./types.js"
 
 interface NativeModule {
@@ -60,8 +61,12 @@ export function createNativeRenderer(onEvent?: (event: EventPayload) => void): N
         return
       }
       if (event !== null) {
-        handleGpuiEvent(event, renderer)
-        onEvent?.(event)
+        try {
+          const delivered = handleGpuiEvent(event, renderer)
+          if (delivered || event.elementId === 0) onEvent?.(event)
+        } catch (error) {
+          reportRuntimeError(renderer, error)
+        }
       }
     }),
   )

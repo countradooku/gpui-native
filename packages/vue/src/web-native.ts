@@ -3,6 +3,7 @@ import initWasm, { WebGpuiRenderer as WasmGpuiRenderer } from "@gpui-native/wasm
 import { handleGpuiEvent } from "./events.js"
 import { MutationRenderer } from "./mutation-renderer.js"
 import type { NativeNodeId, NativeRenderer } from "./native.js"
+import { reportRuntimeError } from "./runtime-errors.js"
 import type {
   AudioBufferState,
   DebugFrameOverlayMode,
@@ -102,6 +103,16 @@ export class WebNativeRenderer extends MutationRenderer implements NativeRendere
 
   focusElement(elementId: NativeNodeId): void {
     this.#wasm.focusElement(elementId)
+  }
+
+  focusNext(): void {
+    this.#wasm.focusNext()
+  }
+  focusPrevious(): void {
+    this.#wasm.focusPrevious()
+  }
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void {
+    this.#wasm.setWindowKeyEvents(keyDown, keyUp, eventId)
   }
 
   blur(): void {
@@ -278,8 +289,12 @@ export class WebNativeRenderer extends MutationRenderer implements NativeRendere
   #drainEvents(): void {
     const events = parseJson<EventPayload[]>(this.#wasm.drainEventsJson())
     for (const event of events) {
-      handleGpuiEvent(event, this)
-      this.#onEvent?.(event)
+      try {
+        const delivered = handleGpuiEvent(event, this)
+        if (delivered || event.elementId === 0) this.#onEvent?.(event)
+      } catch (error) {
+        reportRuntimeError(this, error)
+      }
     }
   }
 }

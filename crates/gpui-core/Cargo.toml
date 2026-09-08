@@ -14,7 +14,7 @@ base64 = "0.22"
 csscolorparser = "0.8.3"
 env_logger = "0.11"
 futures = "0.3"
-gpui = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
+gpui = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false, features = [
   "profiler",
 ] }
 log = "0.4"
@@ -28,11 +28,12 @@ unicode-segmentation = "1"
 web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-gpui = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
+reqwest_client = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9" }
+gpui = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false, features = [
   "font-kit",
   "profiler",
 ] }
-gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
+gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false, features = [
   "font-kit",
   "wayland",
   "x11",
@@ -47,15 +48,18 @@ syntect = { version = "5.3", default-features = false, features = ["regex-fancy"
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false }
+gpui_platform = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false }
 js-sys = "0.3"
 wasm-bindgen = "=0.2.127"
 web-sys = { version = "0.3", features = ["Navigator", "Window"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "8b94defe56992b3ca4ffd4853ace741d8168111a", default-features = false, features = [
+gpui_macos = { git = "https://github.com/remorses/zed.git", rev = "1f9d1cd88656cf1759b0bdad32fa3e2df3c4b0b9", default-features = false, features = [
   "font-kit",
 ] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] }
 
 [features]
 default = []

@@ -115,6 +115,28 @@ impl WebGpuiRenderer {
         self.inner.focus_element(element_id).map_err(js_error)
     }
 
+    #[wasm_bindgen(js_name = focusNext)]
+    pub fn focus_next(&self) -> Result<(), JsValue> {
+        self.inner.focus_next().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = focusPrevious)]
+    pub fn focus_previous(&self) -> Result<(), JsValue> {
+        self.inner.focus_previous().map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = setWindowKeyEvents)]
+    pub fn set_window_key_events(
+        &self,
+        key_down: bool,
+        key_up: bool,
+        event_id: f64,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_window_key_events(key_down, key_up, event_id)
+            .map_err(js_error)
+    }
+
     pub fn blur(&self) -> Result<(), JsValue> {
         self.inner.blur().map_err(js_error)
     }

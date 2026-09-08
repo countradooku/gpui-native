@@ -1,5 +1,6 @@
 // Keep the complete workspace lint policy active for the native engine.
 
+mod accessibility;
 #[cfg(target_os = "macos")]
 mod app_menu;
 mod audio;

@@ -30,6 +30,8 @@ for this runtime going forward: bindings for other frameworks and platforms
 (React, Svelte, Solid, and eventually mobile hosts) will be published there as they
 land.
 
+The upstream baseline and subsequent ports are tracked in [the GPUix synchronization record](docs/upstream-sync.md).
+
 ## Install
 
 ```bash

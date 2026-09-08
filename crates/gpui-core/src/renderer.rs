@@ -102,13 +102,37 @@ impl std::error::Error for Error {}
 #[cfg(target_family = "wasm")]
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-gpui::actions!(gpui_vue_focus, [FocusNext, FocusPrevious]);
+const SELECTION_SCROLL_TICK_MS: u64 = 24;
+const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
+const SELECTION_SCROLL_MAX_STEP_PX: f32 = 24.0;
 
-pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
-    cx.bind_keys([
-        gpui::KeyBinding::new("tab", FocusNext, None),
-        gpui::KeyBinding::new("shift-tab", FocusPrevious, None),
-    ]);
+/// Signed list scroll step for a pointer near a viewport edge.
+fn selection_scroll_step(
+    bounds: gpui::Bounds<gpui::Pixels>,
+    position: gpui::Point<gpui::Pixels>,
+) -> f32 {
+    let height = f32::from(bounds.size.height);
+    if height <= 0.0 {
+        return 0.0;
+    }
+    let edge = SELECTION_SCROLL_EDGE_PX.min(height / 6.0);
+    if edge <= 0.0 {
+        return 0.0;
+    }
+    let y = f32::from(position.y);
+    let top = f32::from(bounds.top());
+    let bottom = f32::from(bounds.bottom());
+    let scaled = |penetration: f32| {
+        let progress = (penetration / edge).clamp(0.0, 1.0);
+        SELECTION_SCROLL_MAX_STEP_PX * progress * progress
+    };
+    if y < top + edge {
+        -scaled(top + edge - y)
+    } else if y > bottom - edge {
+        scaled(y - (bottom - edge))
+    } else {
+        0.0
+    }
 }
 
 /// The Window menu items act on the focused window, and the root element is the
@@ -466,6 +490,13 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    FocusNext,
+    FocusPrevious,
+    SetWindowKeyEvents {
+        key_down: bool,
+        key_up: bool,
+        event_id: u64,
+    },
     ControlClock {
         control: ClockControl,
         response: SyncSender<f64>,
@@ -504,6 +535,35 @@ enum ThreadedAppCommand {
     Open(OpenWindowRequest),
 }
 
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code, reason = "Win32 DPI setup has no safe wrapper in GPUI")]
+fn enable_per_monitor_dpi() {
+    use windows::Win32::UI::HiDpi::{
+        AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetThreadDpiAwarenessContext,
+        SetProcessDpiAwarenessContext, SetThreadDpiAwarenessContext,
+    };
+
+    // SAFETY: Called only on the GPUI UI thread before it creates any HWND.
+    // All arguments are documented constant DPI awareness handles.
+    unsafe {
+        let current = GetThreadDpiAwarenessContext();
+        if AreDpiAwarenessContextsEqual(current, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+            .as_bool()
+        {
+            return;
+        }
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok() {
+            return;
+        }
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok() {
+            return;
+        }
+        // Process awareness is already locked (node/bun manifest). This thread has no HWND yet.
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 fn threaded_app_sender() -> Result<mpsc::UnboundedSender<ThreadedAppCommand>> {
     static SENDER: OnceLock<Mutex<Option<mpsc::UnboundedSender<ThreadedAppCommand>>>> =
@@ -520,12 +580,14 @@ fn threaded_app_sender() -> Result<mpsc::UnboundedSender<ThreadedAppCommand>> {
     std::thread::Builder::new()
         .name("gpui_vue-ui".to_string())
         .spawn(move || {
+            #[cfg(target_os = "windows")]
+            enable_per_monitor_dpi();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 gpui_platform::application()
                     .with_quit_mode(gpui::QuitMode::Explicit)
                     .run(move |cx| {
-                        init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
+                        crate::custom_elements::img::init(cx);
                         cx.spawn(async move |cx| {
                             run_threaded_app_commands(receiver, cx).await;
                         })
@@ -814,6 +876,21 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::FocusNext => gpui::AnyWindowHandle::from(window)
+                .update(cx, |_, window, cx| window.focus_next(cx)),
+            UiCommand::FocusPrevious => gpui::AnyWindowHandle::from(window)
+                .update(cx, |_, window, cx| window.focus_prev(cx)),
+            UiCommand::SetWindowKeyEvents {
+                key_down,
+                key_up,
+                event_id,
+            } => window.update(cx, move |view, window, cx| {
+                view.window_key_down = key_down;
+                view.window_key_up = key_up;
+                view.window_key_event_id = event_id;
+                cx.notify();
+                window.refresh();
+            }),
             UiCommand::ControlClock { control, response } => {
                 window.update(cx, move |view, _window, cx| {
                     let now_ms = match control {
@@ -827,58 +904,67 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::DispatchMouse { input, response } => {
-                let result = window.update(cx, move |_view, window, cx| match input {
-                    MouseInput::Click {
-                        x,
-                        y,
-                        button,
-                        modifiers,
-                    } => {
-                        crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
-                    }
-                    MouseInput::Down {
-                        x,
-                        y,
-                        button,
-                        modifiers,
-                    } => {
-                        crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
-                    }
-                    MouseInput::Up {
-                        x,
-                        y,
-                        button,
-                        modifiers,
-                    } => {
-                        crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
-                    }
-                    MouseInput::Move {
-                        x,
-                        y,
-                        pressed_button,
-                        modifiers,
-                    } => {
-                        crate::automation::dispatch_mouse_move(
-                            window,
-                            cx,
-                            x,
-                            y,
-                            pressed_button,
-                            modifiers,
-                        );
-                    }
-                    MouseInput::Wheel {
-                        x,
-                        y,
-                        delta_x,
-                        delta_y,
-                        modifiers,
-                    } => {
-                        crate::automation::dispatch_scroll_wheel(
-                            window, cx, x, y, delta_x, delta_y, modifiers,
-                        );
-                    }
-                });
+                let result =
+                    gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
+                        match input {
+                            MouseInput::Click {
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_click(
+                                    window, cx, x, y, button, modifiers,
+                                );
+                            }
+                            MouseInput::Down {
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_mouse_down(
+                                    window, cx, x, y, button, modifiers,
+                                );
+                            }
+                            MouseInput::Up {
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_mouse_up(
+                                    window, cx, x, y, button, modifiers,
+                                );
+                            }
+                            MouseInput::Move {
+                                x,
+                                y,
+                                pressed_button,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_mouse_move(
+                                    window,
+                                    cx,
+                                    x,
+                                    y,
+                                    pressed_button,
+                                    modifiers,
+                                );
+                            }
+                            MouseInput::Wheel {
+                                x,
+                                y,
+                                delta_x,
+                                delta_y,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_scroll_wheel(
+                                    window, cx, x, y, delta_x, delta_y, modifiers,
+                                );
+                            }
+                        }
+                    });
                 response
                     .send(
                         result
@@ -981,6 +1067,12 @@ impl Drop for GpuiRenderer {
 // ── GPUI View ────────────────────────────────────────────────────────
 
 pub(crate) struct GpuiView {
+    pub(crate) window_key_down: bool,
+    pub(crate) window_key_up: bool,
+    pub(crate) window_key_event_id: u64,
+    selection_drag_position: Option<gpui::Point<gpui::Pixels>>,
+    selection_scroll_list: Option<u64>,
+    selection_scroll_task: Option<gpui::Task<()>>,
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     /// Structurally shared immutable tree used after the mutation lock is released.
     render_tree: Arc<RetainedTree>,
@@ -1131,6 +1223,108 @@ fn resolve_highlight(
 }
 
 impl GpuiView {
+    fn on_selection_mouse_move(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let list_id = self
+            .selection_scroll_list
+            .filter(|id| {
+                self.virtual_lists.get(id).is_some_and(|entry| {
+                    let bounds = entry.state.viewport_bounds();
+                    position.x >= bounds.left() && position.x <= bounds.right()
+                })
+            })
+            .or_else(|| {
+                self.virtual_lists
+                    .iter()
+                    .find(|(_, entry)| entry.state.viewport_bounds().contains(&position))
+                    .map(|(id, _)| *id)
+            });
+        let Some(list_id) = list_id else {
+            self.stop_selection_scroll();
+            return;
+        };
+        self.selection_drag_position = Some(position);
+        self.selection_scroll_list = Some(list_id);
+        self.schedule_selection_scroll(cx);
+    }
+
+    fn stop_selection_scroll(&mut self) {
+        self.selection_drag_position = None;
+        self.selection_scroll_list = None;
+        self.selection_scroll_task = None;
+    }
+
+    fn schedule_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.selection_scroll_task.is_some() || !self.selection.lock().is_dragging() {
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            return;
+        };
+        if selection_scroll_step(entry.state.viewport_bounds(), position) == 0.0 {
+            return;
+        }
+        self.selection_scroll_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(SELECTION_SCROLL_TICK_MS))
+                .await;
+            if let Err(error) = view.update(cx, |view, cx| {
+                view.selection_scroll_task = None;
+                view.step_selection_scroll(cx);
+            }) {
+                log::debug!("selection scroll stopped after view teardown: {error}");
+            }
+        }));
+    }
+
+    fn step_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            self.stop_selection_scroll();
+            return;
+        };
+        let step = selection_scroll_step(entry.state.viewport_bounds(), position);
+        if step == 0.0 {
+            return;
+        }
+
+        let before = entry.state.logical_scroll_top();
+        let selection_moved = crate::text::paint::update_drag_at(&self.selection, position);
+        entry.state.scroll_by(gpui::px(step));
+        let after = entry.state.logical_scroll_top();
+        let list_moved =
+            after.item_ix != before.item_ix || after.offset_in_item != before.offset_in_item;
+        if !selection_moved && !list_moved {
+            self.stop_selection_scroll();
+            return;
+        }
+        cx.notify();
+        self.schedule_selection_scroll(cx);
+    }
+
+    /// Sync focus handles with the current element tree.
+    /// Creates handles for new focusable elements, subscribes `on_focus/on_blur`,
+    /// and cleans up handles for destroyed elements.
     pub(crate) fn new(
         tree: Arc<Mutex<RetainedTree>>,
         event_callback: Option<EventCallback>,
@@ -1149,6 +1343,12 @@ impl GpuiView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            window_key_down: false,
+            window_key_up: false,
+            window_key_event_id: 0,
+            selection_drag_position: None,
+            selection_scroll_list: None,
+            selection_scroll_task: None,
             virtual_lists: HashMap::new(),
             clock,
             highlights: HashMap::new(),
@@ -1542,6 +1742,7 @@ impl GpuiView {
 }
 
 impl gpui::Render for GpuiView {
+    #[allow(clippy::too_many_lines)]
     fn render(
         &mut self,
         window: &mut gpui::Window,
@@ -1628,12 +1829,28 @@ impl gpui::Render for GpuiView {
         // longer on screen.
         let result = {
             use gpui::prelude::*;
-            let root = gpui::div()
-                .size_full()
-                .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-                .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
+            let drag_move_view = cx.entity().downgrade();
+            let drag_end_view = cx.entity().downgrade();
+            let root = gpui::div().size_full().child(window_key_events(
+                callback.clone(),
+                self.window_key_down,
+                self.window_key_up,
+                self.window_key_event_id,
+            ));
             with_window_menu_actions(root)
-                .child(selection_frame_reset(self.selection.clone()))
+                .child(selection_frame_reset(
+                    self.selection.clone(),
+                    move |position, app| {
+                        drag_move_view
+                            .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
+                            .ok();
+                    },
+                    move |app| {
+                        drag_end_view
+                            .update(app, |view, _cx| view.stop_selection_scroll())
+                            .ok();
+                    },
+                ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(result)
                 .into_any_element()
@@ -1714,10 +1931,10 @@ impl EdgeInsets {
     #[cfg(any(target_os = "macos", target_family = "wasm"))]
     fn from_gpui(insets: gpui::Edges<gpui::Pixels>) -> Self {
         Self {
-            top: f32::from(insets.top) as f64,
-            right: f32::from(insets.right) as f64,
-            bottom: f32::from(insets.bottom) as f64,
-            left: f32::from(insets.left) as f64,
+            top: f64::from(f32::from(insets.top)),
+            right: f64::from(f32::from(insets.right)),
+            bottom: f64::from(f32::from(insets.bottom)),
+            left: f64::from(f32::from(insets.left)),
         }
     }
 }
@@ -2326,4 +2543,56 @@ mod batch_tests {
         tree.styles.sweep();
         assert_eq!(tree.styles.len(), 0);
     }
+}
+
+fn window_key_events(
+    callback: Option<EventCallback>,
+    key_down: bool,
+    key_up: bool,
+    event_id: u64,
+) -> impl gpui::IntoElement {
+    use gpui::prelude::*;
+
+    gpui::canvas(
+        |_, _, _| (),
+        move |_, (), window, _| {
+            if key_down || cfg!(all(target_arch = "wasm32", target_os = "unknown")) {
+                let callback = callback.clone();
+                window.on_root_key_event(move |event: &gpui::KeyDownEvent, phase, _window, _cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    if key_down {
+                        emit_event_full(&callback, event_id, "windowKeyDown", |payload| {
+                            payload.key = Some(event.keystroke.key.clone());
+                            payload.key_char.clone_from(&event.keystroke.key_char);
+                            payload.is_held = Some(event.is_held);
+                            payload.modifiers = Some(event.keystroke.modifiers.into());
+                        });
+                    }
+                    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+                    if event.keystroke.key == "tab" {
+                        // Keep browser focus on GPUI's hidden keyboard element.
+                        _cx.stop_propagation();
+                    }
+                });
+            }
+            if key_up {
+                let callback = callback.clone();
+                window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, _window, _cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    emit_event_full(&callback, event_id, "windowKeyUp", |payload| {
+                        payload.key = Some(event.keystroke.key.clone());
+                        payload.key_char.clone_from(&event.keystroke.key_char);
+                        payload.modifiers = Some(event.keystroke.modifiers.into());
+                    });
+                });
+            }
+        },
+    )
+    .absolute()
+    .w(gpui::px(0.0))
+    .h(gpui::px(0.0))
 }

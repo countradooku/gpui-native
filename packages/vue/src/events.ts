@@ -5,8 +5,16 @@ export type GpuiEventHandlerValue = GpuiEventHandler | GpuiEventHandler[]
 
 type HandlerMap = Map<NativeNodeId, Map<string, GpuiEventHandlerValue>>
 
-const fallbackEventHandlers: HandlerMap = new Map()
-const rendererEventHandlers = new WeakMap<object, HandlerMap>()
+const eventStateKey = Symbol.for("gpui-native.vue.events")
+const eventState = (Reflect.get(globalThis, eventStateKey) as
+  | {
+      fallback: HandlerMap
+      renderers: WeakMap<object, HandlerMap>
+    }
+  | undefined) ?? { fallback: new Map(), renderers: new WeakMap() }
+Reflect.set(globalThis, eventStateKey, eventState)
+const fallbackEventHandlers = eventState.fallback
+const rendererEventHandlers = eventState.renderers
 
 export const EVENT_PROPS = [
   ["onToggleFile", "toggleFile"],
@@ -64,13 +72,14 @@ export function patchEvent(
   }
 }
 
-export function handleGpuiEvent(payload: EventPayload, renderer?: NativeRenderer): void {
+export function handleGpuiEvent(payload: EventPayload, renderer?: NativeRenderer): boolean {
   const handler = handlersFor(renderer).get(payload.elementId)?.get(payload.eventType)
   if (Array.isArray(handler)) {
     for (const callback of handler.slice()) callback(payload)
   } else {
     handler?.(payload)
   }
+  return handler !== undefined
 }
 
 export function subscribeRendererEvent(

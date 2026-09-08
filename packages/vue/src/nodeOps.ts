@@ -255,7 +255,12 @@ export function createPatchProp(renderer: NativeRenderer) {
       return
     }
 
-    if (!BUILT_IN_TYPES.has(element.tag) || UNIVERSAL_PROPS.has(key)) {
+    if (
+      !BUILT_IN_TYPES.has(element.tag) ||
+      UNIVERSAL_PROPS.has(key) ||
+      key === "role" ||
+      key.startsWith("aria-")
+    ) {
       renderer.setCustomProp(element.id, key, serializeCustomProp(next))
     }
     setLocalProp(element, key, next)

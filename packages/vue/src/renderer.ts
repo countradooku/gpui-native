@@ -13,7 +13,21 @@ import { MemoryNativeRenderer, type NativeRenderer } from "./native.js"
 import { createNodeOps, createPatchProp } from "./nodeOps.js"
 import { createGpuiRoot, type GpuiContainer, type GpuiNode } from "./nodes.js"
 
-const rendererOwners = new WeakMap<NativeRenderer, symbol>()
+const rendererStateKey = Symbol.for("gpui-native.vue.renderers")
+const rendererState = (Reflect.get(globalThis, rendererStateKey) as
+  | {
+      owners: WeakMap<NativeRenderer, symbol>
+      ids: WeakMap<NativeRenderer, number>
+    }
+  | undefined) ?? { owners: new WeakMap(), ids: new WeakMap() }
+Reflect.set(globalThis, rendererStateKey, rendererState)
+const rendererOwners = rendererState.owners
+
+export function allocateRendererId(renderer: NativeRenderer): number {
+  const id = (rendererState.ids.get(renderer) ?? 0) + 1
+  rendererState.ids.set(renderer, id)
+  return id
+}
 
 export interface GpuiRendererHost {
   /** The caller-provided first-party Rust renderer (or memory renderer in tests). */
@@ -41,8 +55,7 @@ export function createGpuiRenderer(
 
   try {
     const renderer = wrapWithBatching(nativeRenderer)
-    let nextId = 0
-    const allocateId = (): number => ++nextId
+    const allocateId = (): number => allocateRendererId(nativeRenderer)
 
     // A native root div lets Vue fragments have multiple top-level host nodes.
     const rootId = allocateId()

@@ -1,15 +1,26 @@
+// N-API requires owned arguments and instance methods; GPUI test state is thread-local.
+// JS numbers are f64, while GPUI coordinates are f32. IDs are validated before use.
+#![allow(
+    clippy::unused_self,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+
 use parking_lot::Mutex;
-/// TestGpuiRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
+/// `TestGpuiRenderer` — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
-/// Uses gpui::VisualTestAppContext with the native Metal or DirectX renderer
-/// and TestDispatcher for deterministic scheduling. Runs the SAME GpuiView,
-/// build_element(), apply_styles(), and event handlers as production.
+/// Uses `gpui::VisualTestAppContext` with the native Metal or DirectX renderer
+/// and `TestDispatcher` for deterministic scheduling. Runs the SAME `GpuiView`,
+/// `build_element()`, `apply_styles()`, and event handlers as production.
 ///
 /// Windows are positioned offscreen at (-10000, -10000) — invisible but
-/// fully rendered by the native GPU. This enables capture_screenshot() for visual
+/// fully rendered by the native GPU. This enables `capture_screenshot()` for visual
 /// test validation.
 ///
-/// VisualTestAppContext is !Send, so it is stored in thread-local state.
+/// `VisualTestAppContext` is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -29,8 +40,8 @@ use crate::retained_tree::RetainedTree;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
-/// Bundles VisualTestAppContext + window handle + view entity.
-/// Stored in thread_local because VisualTestAppContext is !Send (Rc<AppCell>).
+/// Bundles `VisualTestAppContext` + window handle + view entity.
+/// Stored in `thread_local` because `VisualTestAppContext` is !Send (Rc<AppCell>).
 /// Field order is load-bearing: Rust drops fields in declaration order, and
 /// gpui panics at app teardown if an `Entity` handle outlives its `App`.
 /// `view` must therefore be declared before `cx`.
@@ -82,9 +93,9 @@ thread_local! {
     static TEST_STATE: RefCell<Option<VisualTestState>> = const { RefCell::new(None) };
 }
 
-/// Access VisualTestAppContext + window + view mutably within thread_local.
-/// The closure receives (&mut cx, window_handle, &view_entity).
-/// Returns Err if no TestGpuiRenderer has been created on this thread.
+/// Access `VisualTestAppContext` + window + view mutably within `thread_local`.
+/// The closure receives (&mut cx, `window_handle`, &`view_entity`).
+/// Returns Err if no `TestGpuiRenderer` has been created on this thread.
 fn with_test_state<R>(
     f: impl FnOnce(
         &mut gpui::VisualTestAppContext,
@@ -127,7 +138,7 @@ fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32
     Ok(pixels)
 }
 
-/// Convert JS button number (0=left, 1=middle, 2=right) to GPUI MouseButton.
+/// Convert JS button number (0=left, 1=middle, 2=right) to GPUI `MouseButton`.
 fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     match button {
         1 => gpui::MouseButton::Middle,
@@ -138,24 +149,26 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
 
 // ── TestGpuiRenderer ────────────────────────────────────────────────
 
-/// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
-/// Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
-/// Same GpuiView and rendering pipeline as production.
+/// GPU-backed GPUI test renderer. Uses `VisualTestAppContext` with the native
+/// Metal or DirectX renderer and `TestDispatcher` for deterministic scheduling.
+/// Same `GpuiView` and rendering pipeline as production.
 ///
 /// Usage from JS:
-///   const r = new TestGpuiRenderer()
-///   r.createElement(1, "div")
-///   r.setRoot(1)
-///   r.commitMutations()
-///   r.flush()                  // triggers GpuiView::render() on the GPU
-///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
-///   const events = r.drainEvents()
-///   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
+/// ```javascript
+/// const r = new TestGpuiRenderer()
+/// r.createElement(1, "div")
+/// r.setRoot(1)
+/// r.commitMutations()
+/// r.flush()                  // paints the retained view on the GPU
+/// r.simulateClick(50, 50)    // dispatches through GPUI hit testing
+/// const events = r.drainEvents()
+/// r.captureScreenshot("/tmp/test.png")
+/// ```
 #[napi]
 pub struct TestGpuiRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     events: Arc<Mutex<Vec<EventPayload>>>,
-    /// Same handle GpuiView paints against, so tests can assert on the live
+    /// Same handle `GpuiView` paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
 }
@@ -186,7 +199,6 @@ impl TestGpuiRenderer {
         let platform = gpui_platform::current_platform(false);
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
-            crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
         });
 
@@ -204,19 +216,25 @@ impl TestGpuiRenderer {
                     )
                 })
             })
-            .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("Failed to open test window: {e}")))?;
 
         // Get the root entity (Entity<GpuiView>) from the window.
         let view = window_handle
             .entity(&cx)
-            .map_err(|e| Error::from_reason(format!("Failed to get root view: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("Failed to get root view: {e}")))?;
 
         // Convert typed WindowHandle<GpuiView> to AnyWindowHandle for simulation methods.
         let window: gpui::AnyWindowHandle = window_handle.into();
 
+        cx.update_window(window, |_, window, _| {
+            window.set_a11y_active_for_tests(true);
+        })
+        .map_err(|error| Error::from_reason(error.to_string()))?;
+        cx.run_until_parked();
+
         // Store !Send types on the JS main thread.
         TEST_STATE.with(|cell| {
-            *cell.borrow_mut() = Some(VisualTestState { cx, window, view });
+            *cell.borrow_mut() = Some(VisualTestState { view, window, cx });
         });
 
         Ok(Self {
@@ -311,7 +329,7 @@ impl TestGpuiRenderer {
     pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
         let id = to_element_id(id)?;
         let value: serde_json::Value = serde_json::from_str(&value_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {e}")))?;
         self.tree.lock().set_custom_prop(id, key, value);
         Ok(())
     }
@@ -327,14 +345,14 @@ impl TestGpuiRenderer {
     }
 
     /// Signal that a batch of mutations is complete.
-    /// In tests, this is a no-op — flush() handles the actual re-render.
+    /// In tests, this is a no-op — `flush()` handles the actual re-render.
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
         Ok(())
     }
 
     /// Apply a batch of mutations in a single FFI call.
-    /// Same format as GpuiRenderer::apply_batch (string op names).
+    /// Same format as `GpuiRenderer::apply_batch` (string op names).
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
@@ -346,7 +364,7 @@ impl TestGpuiRenderer {
     // ── Test-specific methods ────────────────────────────────────────
 
     /// Notify the view entity and run GPUI until parked.
-    /// This triggers GpuiView::render() → build_element() → GPUI layout.
+    /// This triggers `GpuiView::render()` → `build_element()` → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
     /// hit testing requires elements to be laid out).
     #[napi]
@@ -366,9 +384,9 @@ impl TestGpuiRenderer {
     }
 
     /// Simulate a click at the given window coordinates.
-    /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
+    /// Dispatches `MouseDown` + `MouseUp` through GPUI's input pipeline,
     /// which triggers the same event handlers as production.
-    /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+    /// IMPORTANT: Call `flush()` before this — hit testing requires laid-out elements.
     /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
     #[napi]
     pub fn simulate_click(
@@ -421,15 +439,14 @@ impl TestGpuiRenderer {
 
     /// Simulate a single key down event through GPUI's input pipeline.
     /// Format: modifier-key string, e.g. "a", "enter", "cmd-s".
-    /// Unlike simulate_keystrokes, this dispatches ONLY a KeyDownEvent —
-    /// no automatic KeyUpEvent follows. Use with simulate_key_up for
+    /// Unlike `simulate_keystrokes`, this dispatches ONLY a `KeyDownEvent` —
+    /// no automatic `KeyUpEvent` follows. Use with `simulate_key_up` for
     /// fine-grained key event testing.
     #[napi]
     pub fn simulate_key_down(&self, keystroke: String, is_held: Option<bool>) -> Result<()> {
         with_test_state(|cx, window, _view| {
-            let parsed = gpui::Keystroke::parse(&keystroke).map_err(|e| {
-                Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
-            })?;
+            let parsed = gpui::Keystroke::parse(&keystroke)
+                .map_err(|e| Error::from_reason(format!("Invalid keystroke '{keystroke}': {e}")))?;
 
             cx.simulate_event(
                 window,
@@ -446,13 +463,12 @@ impl TestGpuiRenderer {
 
     /// Simulate a single key up event through GPUI's input pipeline.
     /// Format: modifier-key string, e.g. "a", "enter", "cmd-s".
-    /// Pairs with simulate_key_down for fine-grained key event testing.
+    /// Pairs with `simulate_key_down` for fine-grained key event testing.
     #[napi]
     pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
         with_test_state(|cx, window, _view| {
-            let parsed = gpui::Keystroke::parse(&keystroke).map_err(|e| {
-                Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
-            })?;
+            let parsed = gpui::Keystroke::parse(&keystroke)
+                .map_err(|e| Error::from_reason(format!("Invalid keystroke '{keystroke}': {e}")))?;
 
             cx.simulate_event(window, gpui::KeyUpEvent { keystroke: parsed });
 
@@ -461,7 +477,7 @@ impl TestGpuiRenderer {
     }
 
     /// Simulate a mouse move to the given coordinates.
-    /// pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
+    /// `pressed_button`: optional mouse button held during move (0=left, 1=middle, 2=right).
     /// Used to simulate drag events.
     #[napi]
     pub fn simulate_mouse_move(
@@ -487,9 +503,9 @@ impl TestGpuiRenderer {
     }
 
     /// Focus an element by its numeric ID.
-    /// The element must have a FocusHandle (created by sync_focus_handles when
+    /// The element must have a `FocusHandle` (created by `sync_focus_handles` when
     /// the element has keyDown, keyUp, focus, or blur listeners).
-    /// Call flush() before this so the element tree and focus handles exist.
+    /// Call `flush()` before this so the element tree and focus handles exist.
     #[napi]
     pub fn focus_element(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
@@ -558,7 +574,7 @@ impl TestGpuiRenderer {
     }
 
     /// Simulate a scroll wheel event at the given position.
-    /// delta_x and delta_y are in pixels (negative = scroll up/left).
+    /// `delta_x` and `delta_y` are in pixels (negative = scroll up/left).
     #[napi]
     pub fn simulate_scroll_wheel(
         &self,
@@ -662,7 +678,7 @@ impl TestGpuiRenderer {
 
     /// Set the scroll offset of a scrollable element.
     /// x and y are negative pixel values (scroll down = more negative y).
-    /// Call flush() after to apply the offset and re-render.
+    /// Call `flush()` after to apply the offset and re-render.
     #[napi]
     pub fn scroll_to(&self, element_id: f64, x: f64, y: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
@@ -684,7 +700,7 @@ impl TestGpuiRenderer {
     }
 
     /// Scroll a child into view by its index in the children list.
-    /// Call flush() after to apply and re-render.
+    /// Call `flush()` after to apply and re-render.
     #[napi]
     pub fn scroll_to_item(
         &self,
@@ -840,12 +856,12 @@ impl TestGpuiRenderer {
             // Capture via the platform renderer's render_to_image implementation.
             let image = cx
                 .capture_screenshot(window)
-                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?;
 
             // Save as PNG (format inferred from file extension).
             image
                 .save(&path)
-                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {e}")))?;
 
             Ok(())
         })
@@ -898,8 +914,7 @@ impl TestGpuiRenderer {
         Ok(tree
             .elements
             .get(&id)
-            .map(|e| e.events.contains(&event_type))
-            .unwrap_or(false))
+            .is_some_and(|e| e.events.contains(&event_type)))
     }
 
     /// Get the text content of an element.
@@ -919,17 +934,44 @@ impl TestGpuiRenderer {
         let tree = self.tree.lock();
         let json = tree.to_json(&std::collections::HashMap::new());
         serde_json::to_string_pretty(&json)
-            .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
+            .map_err(|e| Error::from_reason(format!("JSON serialization failed: {e}")))
     }
 
     /// Tree JSON with last-paint bounds. Used by the automation locators.
+    /// GPUI accessibility tree from the last painted frame.
+    #[napi(js_name = "advanceTime")]
+    pub fn advance_time(&self, milliseconds: f64) -> Result<()> {
+        let duration =
+            std::time::Duration::try_from_secs_f64(milliseconds / 1000.0).map_err(|_| {
+                Error::from_reason("advanceTime requires a finite non-negative duration")
+            })?;
+        with_test_state(|cx, _window, _view| {
+            cx.advance_clock(duration);
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi(js_name = "getA11yTree")]
+    pub fn get_a11y_tree(&self) -> Result<String> {
+        self.flush()?;
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, _| {
+                window
+                    .debug_a11y_tree_json()
+                    .unwrap_or_else(|| "{}".to_owned())
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
         self.flush()?;
         let tree = self.tree.lock();
         let json = tree.to_automation_json(&crate::automation::all_bounds());
         serde_json::to_string(&json)
-            .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
+            .map_err(|e| Error::from_reason(format!("JSON serialization failed: {e}")))
     }
 
     /// Last painted bounds for an element, or null if it was not painted.
@@ -1028,8 +1070,8 @@ impl TestGpuiRenderer {
                 .update_window(window, |_, window, _| window.viewport_size())
                 .map_err(|error| Error::from_reason(error.to_string()))?;
             Ok(crate::renderer::WindowSize {
-                width: f32::from(size.width) as f64,
-                height: f32::from(size.height) as f64,
+                width: f64::from(f32::from(size.width)),
+                height: f64::from(f32::from(size.height)),
             })
         })
     }

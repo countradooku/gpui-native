@@ -132,7 +132,7 @@ pub(crate) fn parse_font_weight(value: &FontWeightValue) -> gpui::FontWeight {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedStyle {
     initialized: bool,
-    background: Option<gpui::Rgba>,
+    background: Option<gpui::Background>,
     color: Option<gpui::Rgba>,
     border_color: Option<gpui::Rgba>,
     shadow_color: Option<gpui::Rgba>,
@@ -155,6 +155,32 @@ pub struct ResolvedStyle {
     pub(crate) text_overflow: Option<TextOverflowValue>,
     pub(crate) font_weight: Option<gpui::FontWeight>,
     pub(crate) visible: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearGradientStopValue {
+    pub color: String,
+    pub position: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum GradientValue {
+    #[serde(rename = "linear-gradient")]
+    LinearGradient {
+        angle: f64,
+        stops: [LinearGradientStopValue; 2],
+        #[serde(rename = "colorSpace")]
+        color_space: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BackgroundValue {
+    Color(String),
+    Gradient(Box<GradientValue>),
 }
 
 /// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
@@ -305,7 +331,7 @@ pub struct StyleDesc {
     pub left: Option<f64>,
 
     // Background & Colors
-    pub background: Option<String>,
+    pub background: Option<BackgroundValue>,
     pub background_color: Option<String>,
     pub color: Option<String>,
     pub opacity: Option<f64>,
@@ -333,6 +359,7 @@ pub struct StyleDesc {
     pub white_space: Option<String>,
     pub text_overflow: Option<String>,
     pub line_clamp: Option<f64>,
+    pub text_decoration: Option<String>,
 
     // Overflow
     pub overflow: Option<String>,
@@ -367,11 +394,7 @@ pub struct StyleDesc {
 
 impl StyleDesc {
     pub(crate) fn resolve_cached_values(&mut self) {
-        let background = self
-            .background_color
-            .as_deref()
-            .or(self.background.as_deref())
-            .and_then(crate::color::parse_color_rgba);
+        let background = self.resolve_background_value();
         self.resolved = ResolvedStyle {
             initialized: true,
             background,
@@ -422,14 +445,18 @@ impl StyleDesc {
         }
     }
 
-    pub(crate) fn resolved_background(&self) -> Option<gpui::Rgba> {
+    fn resolve_background_value(&self) -> Option<gpui::Background> {
+        if let Some(value) = self.background_color.as_deref() {
+            return crate::color::parse_color_rgba(value).map(Into::into);
+        }
+        self.background.as_ref()?.resolve()
+    }
+
+    pub(crate) fn resolved_background(&self) -> Option<gpui::Background> {
         if self.resolved.initialized {
             self.resolved.background
         } else {
-            self.background_color
-                .as_deref()
-                .or(self.background.as_deref())
-                .and_then(crate::color::parse_color_rgba)
+            self.resolve_background_value()
         }
     }
 
@@ -742,7 +769,7 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
         return false;
     }
     match style.resolved_background() {
-        Some(color) => color.a > 0.0,
+        Some(background) => !background.is_transparent(),
         None => true,
     }
 }
@@ -846,6 +873,103 @@ mod tests {
     fn dimensions_reject_non_finite_strings() {
         for value in [r#""NaN""#, r#""inf""#, r#""NaN%""#] {
             assert!(serde_json::from_str::<DimensionValue>(value).is_err());
+        }
+    }
+}
+
+impl BackgroundValue {
+    fn resolve(&self) -> Option<gpui::Background> {
+        match self {
+            Self::Color(value) => crate::color::parse_color_rgba(value).map(Into::into),
+            Self::Gradient(gradient) => {
+                let GradientValue::LinearGradient {
+                    angle,
+                    stops,
+                    color_space,
+                } = gradient.as_ref();
+                let angle = *angle as f32;
+                let [from, to] = stops;
+                let from_position = from.position as f32;
+                let to_position = to.position as f32;
+                if !angle.is_finite()
+                    || !(0.0..=1.0).contains(&from_position)
+                    || !(0.0..=1.0).contains(&to_position)
+                {
+                    return None;
+                }
+
+                let color_space = match color_space.as_deref() {
+                    None | Some("srgb") => gpui::ColorSpace::Srgb,
+                    Some("oklab") => gpui::ColorSpace::Oklab,
+                    _ => return None,
+                };
+                Some(
+                    gpui::linear_gradient(
+                        angle,
+                        gpui::linear_color_stop(
+                            crate::color::parse_color_rgba(&from.color)?,
+                            from_position,
+                        ),
+                        gpui::linear_color_stop(
+                            crate::color::parse_color_rgba(&to.color)?,
+                            to_position,
+                        ),
+                    )
+                    .color_space(color_space),
+                )
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod upstream_gradient_tests {
+    use super::*;
+    #[test]
+    fn resolves_a_two_stop_linear_gradient() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
+        )
+        .unwrap();
+        let expected = gpui::linear_gradient(
+            90.0,
+            gpui::linear_color_stop(crate::color::parse_color_rgba("#ff0000").unwrap(), 0.0),
+            gpui::linear_color_stop(crate::color::parse_color_rgba("#0000ff").unwrap(), 1.0),
+        )
+        .color_space(gpui::ColorSpace::Oklab);
+
+        assert_eq!(style.resolved_background(), Some(expected));
+    }
+
+    #[test]
+    fn transparent_gradient_does_not_occlude() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":0,"stops":[{"color":"transparent","position":0},{"color":"#00000000","position":1}]}}"##,
+        )
+        .unwrap();
+
+        assert!(!should_occlude(&style));
+    }
+
+    #[test]
+    fn cached_gradients_match_uncached_and_background_color_takes_precedence() {
+        let mut style: StyleDesc = serde_json::from_str(r#"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"red","position":0},{"color":"blue","position":1}]}}"#).unwrap();
+        let original = style.resolved_background();
+        style.resolve_cached_values();
+        assert_eq!(style.resolved_background(), original);
+        style.background_color = Some("transparent".into());
+        style.resolve_cached_values();
+        assert!(style.resolved_background().unwrap().is_transparent());
+    }
+
+    #[test]
+    fn rejects_unsupported_gradient_color_space_and_stop_range() {
+        for gradient in [
+            r#"{"type":"linear-gradient","angle":0,"stops":[{"color":"red","position":-1},{"color":"blue","position":1}]}"#,
+            r#"{"type":"linear-gradient","angle":0,"stops":[{"color":"red","position":0},{"color":"blue","position":1}],"colorSpace":"invalid"}"#,
+        ] {
+            let background: BackgroundValue = serde_json::from_str(gradient).unwrap();
+            assert!(background.resolve().is_none());
         }
     }
 }

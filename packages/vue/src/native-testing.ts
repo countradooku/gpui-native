@@ -62,6 +62,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  advanceTime(milliseconds: number): void
+  getA11yTree(): string
   captureScreenshot(path: string): void
   clockPause(): number
   clockSet(nowMs: number): number
@@ -335,6 +337,17 @@ export class TestRenderer extends MutationRenderer implements NativeRenderer {
 
   getDebugFrameOverlayStats(): DebugFrameOverlayStats {
     return this.#native.getDebugFrameOverlayStats()
+  }
+
+  advanceTime(milliseconds: number): void {
+    this.#native.advanceTime(milliseconds)
+    this.dispatchNativeEvents()
+    this.#native.flush()
+  }
+
+  getA11yTree(): unknown {
+    this.flush()
+    return JSON.parse(this.#native.getA11yTree()) as unknown
   }
 
   captureScreenshot(path: string): void {

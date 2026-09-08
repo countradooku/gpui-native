@@ -136,8 +136,8 @@ impl GpuiRenderer {
 
         let application = gpui_platform::single_threaded_web();
         let application_handle = application.run_embedded(move |cx: &mut gpui::App| {
-            init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
+            crate::custom_elements::img::init(cx);
             let bounds = gpui::Bounds::centered(
                 None,
                 gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
@@ -184,6 +184,7 @@ impl GpuiRenderer {
     }
 
     #[cfg(target_os = "macos")]
+    #[allow(clippy::too_many_lines)]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
 
@@ -226,8 +227,8 @@ impl GpuiRenderer {
         let app = gpui::Application::with_platform(platform.clone())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
-            init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
+            crate::custom_elements::img::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
             // the keymap, so every binding must exist before it runs.
             crate::app_menu::init(&app_name, cx);
@@ -517,10 +518,9 @@ impl GpuiRenderer {
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
-                    .map(|platform| platform.pump_events())
-                    .unwrap_or(false)
+                    .is_some_and(|platform| platform.pump_events())
             });
-            return Ok(running);
+            Ok(running)
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -569,8 +569,8 @@ impl GpuiRenderer {
         return update_window(|_view, window, _cx| {
             let size = window.viewport_size();
             WindowSize {
-                width: f32::from(size.width) as f64,
-                height: f32::from(size.height) as f64,
+                width: f64::from(f32::from(size.width)),
+                height: f64::from(f32::from(size.height)),
             }
         });
 
@@ -754,6 +754,7 @@ impl GpuiRenderer {
         self.debug_frame_overlay_mode()
     }
 
+    #[allow(clippy::unused_self)] // N-API instance method over thread-local renderer state.
     fn debug_frame_overlay_mode(&self) -> Result<String> {
         #[cfg(target_os = "macos")]
         return update_window(|_view, window, _cx| {
@@ -940,6 +941,60 @@ impl GpuiRenderer {
             target_family = "wasm"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), napi)]
+    pub fn focus_next(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(gpui::Window::focus_next);
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNext);
+        #[cfg(target_family = "wasm")]
+        return update_web_window_without_view(self.web_renderer_id, |window, cx| {
+            window.focus_next(cx)
+        })
+        .map(|_| ());
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), napi)]
+    pub fn focus_previous(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(gpui::Window::focus_prev);
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPrevious);
+        #[cfg(target_family = "wasm")]
+        return update_web_window_without_view(self.web_renderer_id, |window, cx| {
+            window.focus_prev(cx)
+        })
+        .map(|_| ());
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), napi)]
+    pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.window_key_down = key_down;
+            view.window_key_up = key_up;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        });
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowKeyEvents {
+            key_down,
+            key_up,
+            event_id,
+        });
+        #[cfg(target_family = "wasm")]
+        return update_web_window(self.web_renderer_id, move |view, window, cx| {
+            view.window_key_down = key_down;
+            view.window_key_up = key_up;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        })
+        .map(|_| ());
     }
 
     #[cfg_attr(not(target_family = "wasm"), napi)]
@@ -1554,10 +1609,10 @@ impl GpuiRenderer {
                 window.refresh();
                 window.render_to_image()
             })?
-            .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?;
             image
                 .save(&path)
-                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {e}")))?;
             Ok(())
         }
 

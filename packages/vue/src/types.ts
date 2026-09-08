@@ -171,7 +171,14 @@ export interface StyleDesc {
   bottom?: number
   left?: number
 
-  background?: string
+  background?:
+    | string
+    | {
+        type: "linear-gradient"
+        angle: number
+        stops: [{ color: string; position: number }, { color: string; position: number }]
+        colorSpace?: "srgb" | "oklab"
+      }
   backgroundColor?: string
   color?: string
   opacity?: number
@@ -196,6 +203,7 @@ export interface StyleDesc {
   lineHeight?: number
   whiteSpace?: "normal" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
+  textDecoration?: "underline" | "line-through" | "none"
   lineClamp?: number
 
   overflow?: string
@@ -334,6 +342,14 @@ export type HighlightMatch = GeneratedHighlightMatch
 export type GpuiEventHandler = (event: EventPayload) => void
 
 export interface HostProps {
+  role?: string
+  "aria-id"?: string
+  "aria-label"?: string
+  "aria-description"?: string
+  "aria-valuetext"?: string
+  "aria-expanded"?: boolean
+  "aria-selected"?: boolean
+  "aria-level"?: number
   /** Vue reconciliation key; never forwarded to the native element. */
   key?: PropertyKey
   /** Template/component ref; consumed by Vue and never forwarded. */

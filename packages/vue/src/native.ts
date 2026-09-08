@@ -46,6 +46,9 @@ export interface NativeRenderer {
   activateWindow?(): void
   setWindowTitle?(title: string): void
   focusElement?(elementId: NativeNodeId): void
+  focusNext?(): void
+  focusPrevious?(): void
+  setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
   blur?(): void
   getSelectedText?(): string | null
   clearSelection?(): void

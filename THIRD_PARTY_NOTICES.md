@@ -6,6 +6,10 @@ Portions of `crates/gpui-core` are adapted from the native renderer in
 [remorses/gpuix](https://github.com/remorses/gpuix), commit
 `b8bbff4ef0dc00dc24c3d3f3ca47818e1be15c69`.
 
+Selected subsequent changes are incorporated through the review checkpoint in
+[`docs/upstream-sync.md`](docs/upstream-sync.md). The original import revision
+above is retained for provenance.
+
 The upstream native package declares the Apache License 2.0. The port retains
 the native algorithms and component implementations while replacing the
 React-facing identity and host integration with gpui-vue's Vue renderer.

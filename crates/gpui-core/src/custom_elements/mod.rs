@@ -52,6 +52,7 @@ pub struct CustomRenderContext<'a> {
     /// tree never sees it and the build-time resolver cannot produce ranges for
     /// it. `ctx.text` matches the exact string it is about to paint instead,
     /// which makes drift between the search pass and the paint pass impossible.
+    pub props: &'a HashMap<String, serde_json::Value>,
     pub highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
 }
 
@@ -123,6 +124,7 @@ pub(crate) fn custom_surface(
         el = el.relative();
     }
     el = el.child(crate::automation::bounds_tracker(ctx.id, None));
+    el = crate::accessibility::apply_accessibility(el, ctx.props, None);
     wire_standard_events(el, ctx)
 }
 
@@ -136,14 +138,16 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         let callback = ctx.event_callback.clone();
         match event {
             "click" => {
-                el = el.on_click(move |click, _window, _cx| {
+                el = el.on_mouse_up(gpui::MouseButton::Left, move |click, _window, _cx| {
                     crate::renderer::emit_event_full(&callback, id, "click", |payload| {
-                        let (x, y) = crate::renderer::point_to_xy(click.position());
+                        let (x, y) = crate::renderer::point_to_xy(click.position);
+                        payload.button = Some(0);
+                        payload.is_right_click = Some(false);
                         payload.x = Some(x);
                         payload.y = Some(y);
                         payload.click_count =
-                            Some(u32::try_from(click.click_count()).unwrap_or(u32::MAX));
-                        payload.modifiers = Some(click.modifiers().into());
+                            Some(u32::try_from(click.click_count).unwrap_or(u32::MAX));
+                        payload.modifiers = Some(click.modifiers.into());
                     });
                 });
             }
@@ -165,7 +169,7 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
             _ => {}
         }
     }
-    el
+    crate::accessibility::apply_a11y_click(el, ctx.events, ctx.id, ctx.event_callback.as_ref())
 }
 
 // ── Traits ───────────────────────────────────────────────────────────
