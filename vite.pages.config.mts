@@ -34,6 +34,7 @@ export default defineConfig({
         index: resolve(webRoot, "index.html"),
         counter: resolve(webRoot, "examples/counter/index.html"),
         canvas: resolve(webRoot, "examples/canvas/index.html"),
+        "market-stream": resolve(webRoot, "examples/market-stream/index.html"),
         "motion-timeline": resolve(webRoot, "examples/motion-timeline/index.html"),
         "multiple-windows": resolve(webRoot, "examples/multiple-windows/index.html"),
         "audio-buffer": resolve(webRoot, "examples/audio-buffer/index.html"),

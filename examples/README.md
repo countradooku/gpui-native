@@ -6,6 +6,7 @@ JavaScript render loop.
 
 | Example            | SFC                                                  | Demonstrates                                                        | Run                                                     |
 | ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------- |
+| `market-stream`    | `market-stream/src/App.vue`                          | 100,000-row windowed grid, 20K updates/s, retained live charts      | `bun --filter @gpui-vue/example-market-stream start`    |
 | `chat`             | `chat/src/App.vue`                                   | Waku-style shell, 5,000-row transcript, native rich text, selectors | `bun --filter @gpui-vue/example-chat start`             |
 | `counter`          | `counter/src/App.vue`                                | Vue reactivity, native input/code, and a motion entrance            | `bun --filter @gpui-vue/example-counter start`          |
 | `canvas`           | `canvas/src/App.vue`                                 | Retained GPU paths, pointer events, and a 4,000-point stress case   | `bun --filter @gpui-vue/example-canvas start`           |

@@ -72,6 +72,21 @@
         "vue-tsc": "catalog:",
       },
     },
+    "examples/market-stream": {
+      "name": "@gpui-vue/example-market-stream",
+      "version": "0.1.0",
+      "dependencies": {
+        "gpui-vue": "workspace:^",
+        "vue": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@vitejs/plugin-vue": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vue-tsc": "catalog:",
+      },
+    },
     "examples/motion-timeline": {
       "name": "@gpui-vue/example-motion-timeline",
       "version": "0.1.0",
@@ -155,6 +170,8 @@
     "@gpui-vue/example-chat": ["@gpui-vue/example-chat@workspace:examples/chat"],
 
     "@gpui-vue/example-counter": ["@gpui-vue/example-counter@workspace:examples/counter"],
+
+    "@gpui-vue/example-market-stream": ["@gpui-vue/example-market-stream@workspace:examples/market-stream"],
 
     "@gpui-vue/example-motion-timeline": ["@gpui-vue/example-motion-timeline@workspace:examples/motion-timeline"],
 
