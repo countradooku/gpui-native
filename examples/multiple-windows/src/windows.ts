@@ -1,4 +1,4 @@
-import { createWindow, type GpuiWindowRoot } from "gpui-vue"
+import { createWindow, type GpuiWindowRoot } from "@gpui-native/vue"
 
 import InspectorApp from "./InspectorApp.vue"
 import { inspectorOpen } from "./state.js"

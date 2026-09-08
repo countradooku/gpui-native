@@ -32,8 +32,8 @@ function loadBinding() {
 
   const detail = errors.map((error) => `\n- ${error.message}`).join("")
   throw new Error(
-    `Could not load the first-party gpui-vue native addon for ${platform}/${arch}. ` +
-      `Run \"bun --filter @gpui-vue/native build\" first.${detail}`,
+    `Could not load the first-party gpui-vue native addon for ${process.platform}/${process.arch}. ` +
+      `Run \"bun --filter @gpui-native/core build\" first.${detail}`,
   )
 }
 

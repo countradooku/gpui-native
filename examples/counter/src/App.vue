@@ -7,7 +7,7 @@ import {
   type MotionStyle,
   type MotionTransition,
   type StyleDesc,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { ref } from "vue"
 
 const palette = {

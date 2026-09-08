@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   type SelectItemState,
   type StyleDesc,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { computed } from "vue"
 
 import ChatIcon from "./ChatIcon.vue"

@@ -82,7 +82,7 @@ export interface TestWindowOptions {
 const require = createRequire(import.meta.url)
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
-  const native = require("@gpui-vue/native") as {
+  const native = require("@gpui-native/core") as {
     TestGpuiRenderer?: NativeTestRendererConstructor
   }
   NativeTestRenderer = native.TestGpuiRenderer ?? null

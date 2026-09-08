@@ -11,7 +11,7 @@ import {
   useGpuiWindow,
   type EventPayload,
   type StyleDesc,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 import ChatIcon from "./ChatIcon.vue"

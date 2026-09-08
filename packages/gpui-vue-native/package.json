@@ -1,5 +1,5 @@
 {
-  "name": "@gpui-vue/native",
+  "name": "@gpui-native/core",
   "version": "0.1.0",
   "description": "First-party N-API bindings for gpui-vue",
   "homepage": "https://github.com/countradooku/gpui-vue#readme",

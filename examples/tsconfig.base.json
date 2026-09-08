@@ -5,7 +5,7 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "gpui-vue": ["../packages/gpui-vue/src/index.ts"],
+      "@gpui-native/vue": ["../packages/gpui-vue/src/index.ts"],
       "gpui-vue/*": ["../packages/gpui-vue/src/*.ts"]
     },
     "strict": true,
@@ -15,11 +15,11 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "gpui-vue",
+    "jsxImportSource": "@gpui-native/vue",
     "types": ["node"]
   },
   "vueCompilerOptions": {
-    "lib": "gpui-vue",
+    "lib": "@gpui-native/vue",
     "strictTemplates": true
   }
 }

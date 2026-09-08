@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "gpui-vue": "workspace:^",
+    "@gpui-native/vue": "workspace:^",
     "vue": "catalog:"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import initWasm, { WebGpuiRenderer as WasmGpuiRenderer } from "@gpui-vue/wasm"
+import initWasm, { WebGpuiRenderer as WasmGpuiRenderer } from "@gpui-native/wasm"
 
 import { handleGpuiEvent } from "./events.js"
 import { MutationRenderer } from "./mutation-renderer.js"

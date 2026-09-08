@@ -18,7 +18,7 @@ export default defineConfig({
         replacement: resolve(repositoryRoot, "packages/gpui-vue/src/web.ts"),
       },
       {
-        find: "@gpui-vue/wasm",
+        find: "@gpui-native/wasm",
         replacement: resolve(webRoot, "pkg/gpui_vue_core.js"),
       },
     ],

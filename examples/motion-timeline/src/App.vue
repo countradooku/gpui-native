@@ -8,7 +8,7 @@ import {
   type MotionTransition,
   type StyleDesc,
   type TimelineState,
-} from "gpui-vue"
+} from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 const colors = {

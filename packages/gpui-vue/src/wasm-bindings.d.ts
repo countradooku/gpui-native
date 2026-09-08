@@ -1,4 +1,4 @@
-declare module "@gpui-vue/wasm" {
+declare module "@gpui-native/wasm" {
   export default function init(): Promise<WebAssembly.Exports>
 
   export class WebGpuiRenderer {

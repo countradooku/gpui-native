@@ -1,4 +1,4 @@
-import { initGpuiWeb } from "gpui-vue"
+import { initGpuiWeb } from "@gpui-native/vue"
 
 const example = document.body.dataset.example
 const loaders: Record<string, () => Promise<unknown>> = {
