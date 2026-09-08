@@ -93,6 +93,9 @@ export declare class GpuiRenderer {
   activateWindow(): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  focusNext(): void
+  focusPrevious(): void
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   blur(): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
@@ -165,19 +168,21 @@ export declare class GpuiRenderer {
 }
 
 /**
- * GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
- * Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
- * Same GpuiView and rendering pipeline as production.
+ * GPU-backed GPUI test renderer. Uses `VisualTestAppContext` with the native
+ * Metal or DirectX renderer and `TestDispatcher` for deterministic scheduling.
+ * Same `GpuiView` and rendering pipeline as production.
  *
  * Usage from JS:
- *   const r = new TestGpuiRenderer()
- *   r.createElement(1, "div")
- *   r.setRoot(1)
- *   r.commitMutations()
- *   r.flush()                  // triggers GpuiView::render() on the GPU
- *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
- *   const events = r.drainEvents()
- *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
+ * ```javascript
+ * const r = new TestGpuiRenderer()
+ * r.createElement(1, "div")
+ * r.setRoot(1)
+ * r.commitMutations()
+ * r.flush()                  // paints the retained view on the GPU
+ * r.simulateClick(50, 50)    // dispatches through GPUI hit testing
+ * const events = r.drainEvents()
+ * r.captureScreenshot("/tmp/test.png")
+ * ```
  */
 export declare class TestGpuiRenderer {
   constructor(width?: number | undefined | null, height?: number | undefined | null)
@@ -201,27 +206,27 @@ export declare class TestGpuiRenderer {
   getCustomProp(id: number, key: string): string | null
   /**
    * Signal that a batch of mutations is complete.
-   * In tests, this is a no-op — flush() handles the actual re-render.
+   * In tests, this is a no-op — `flush()` handles the actual re-render.
    */
   commitMutations(): void
   /**
    * Apply a batch of mutations in a single FFI call.
-   * Same format as GpuiRenderer::apply_batch (string op names).
+   * Same format as `GpuiRenderer::apply_batch` (string op names).
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
   applyBatch(json: string): Array<number>
   /**
    * Notify the view entity and run GPUI until parked.
-   * This triggers GpuiView::render() → build_element() → GPUI layout.
+   * This triggers `GpuiView::render()` → `build_element()` → GPUI layout.
    * Must be called after mutations and before simulating events (GPUI's
    * hit testing requires elements to be laid out).
    */
   flush(): void
   /**
    * Simulate a click at the given window coordinates.
-   * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
+   * Dispatches `MouseDown` + `MouseUp` through GPUI's input pipeline,
    * which triggers the same event handlers as production.
-   * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+   * IMPORTANT: Call `flush()` before this — hit testing requires laid-out elements.
    * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
    */
   simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
@@ -234,28 +239,28 @@ export declare class TestGpuiRenderer {
   /**
    * Simulate a single key down event through GPUI's input pipeline.
    * Format: modifier-key string, e.g. "a", "enter", "cmd-s".
-   * Unlike simulate_keystrokes, this dispatches ONLY a KeyDownEvent —
-   * no automatic KeyUpEvent follows. Use with simulate_key_up for
+   * Unlike `simulate_keystrokes`, this dispatches ONLY a `KeyDownEvent` —
+   * no automatic `KeyUpEvent` follows. Use with `simulate_key_up` for
    * fine-grained key event testing.
    */
   simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
   /**
    * Simulate a single key up event through GPUI's input pipeline.
    * Format: modifier-key string, e.g. "a", "enter", "cmd-s".
-   * Pairs with simulate_key_down for fine-grained key event testing.
+   * Pairs with `simulate_key_down` for fine-grained key event testing.
    */
   simulateKeyUp(keystroke: string): void
   /**
    * Simulate a mouse move to the given coordinates.
-   * pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
+   * `pressed_button`: optional mouse button held during move (0=left, 1=middle, 2=right).
    * Used to simulate drag events.
    */
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Focus an element by its numeric ID.
-   * The element must have a FocusHandle (created by sync_focus_handles when
+   * The element must have a `FocusHandle` (created by `sync_focus_handles` when
    * the element has keyDown, keyUp, focus, or blur listeners).
-   * Call flush() before this so the element tree and focus handles exist.
+   * Call `flush()` before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
   /**
@@ -270,7 +275,7 @@ export declare class TestGpuiRenderer {
   simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate a scroll wheel event at the given position.
-   * delta_x and delta_y are in pixels (negative = scroll up/left).
+   * `delta_x` and `delta_y` are in pixels (negative = scroll up/left).
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
   /** The current text selection joined in document order, or null. */
@@ -313,12 +318,12 @@ export declare class TestGpuiRenderer {
   /**
    * Set the scroll offset of a scrollable element.
    * x and y are negative pixel values (scroll down = more negative y).
-   * Call flush() after to apply the offset and re-render.
+   * Call `flush()` after to apply the offset and re-render.
    */
   scrollTo(elementId: number, x: number, y: number): void
   /**
    * Scroll a child into view by its index in the children list.
-   * Call flush() after to apply and re-render.
+   * Call `flush()` after to apply and re-render.
    */
   scrollToItem(elementId: number, index: number, offsetInItem?: number | undefined | null): void
   /**
@@ -365,7 +370,12 @@ export declare class TestGpuiRenderer {
   getText(id: number): string | null
   /** Get the full tree as JSON for snapshot testing. */
   getTreeJson(): string
-  /** Tree JSON with last-paint bounds. Used by the automation locators. */
+  /**
+   * Tree JSON with last-paint bounds. Used by the automation locators.
+   * GPUI accessibility tree from the last painted frame.
+   */
+  advanceTime(milliseconds: number): void
+  getA11yTree(): string
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): Array<number> | null

@@ -17,6 +17,9 @@ declare module "@gpui-native/wasm" {
     activateWindow(): void
     setWindowTitle(title: string): void
     focusElement(elementId: number): void
+    focusNext(): void
+    focusPrevious(): void
+    setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
     blur(): void
     getSelectedText(): string | undefined
     clearSelection(): void

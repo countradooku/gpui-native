@@ -2,14 +2,14 @@
 //!
 //! GPUI never installs a main menu on its own, so `NSApp.mainMenu` stays nil
 //! and macOS paints an empty menu bar. Worse, the standard key equivalents that
-//! AppKit only provides through menu items are missing too, so a gpui-vue app
+//! `AppKit` only provides through menu items are missing too, so a gpui-vue app
 //! cannot be quit with cmd-q, hidden with cmd-h, or minimized with cmd-m.
 //!
 //! `gpui::App::set_menus` reads the key equivalent for each item out of the
 //! keymap, so [`init`] must bind the keys before it sets the menus.
 //!
 //! There is deliberately no Edit menu. A menu key equivalent is consumed by
-//! AppKit before the window sees the key event, so an Edit menu carrying cmd-c
+//! `AppKit` before the window sees the key event, so an Edit menu carrying cmd-c
 //! would take the keystroke away from the window listener that
 //! `crate::text::paint` installs for text selection, and from the per-focus
 //! clipboard handling in `custom_elements::input`.

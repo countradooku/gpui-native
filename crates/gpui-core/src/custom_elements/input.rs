@@ -1,6 +1,12 @@
 //! Native single-line and multiline text editors with platform IME support.
 //!
-//! Caret blinking is ported from Comet's `crates/ui/src/composer.rs` (MIT).
+//! The editor follows GPUI's input example:
+//! <https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/input.rs>
+//! Caret blinking, double-click, drag autoscroll, and bounded undo follow
+//! Comet's composer (MIT). Use Comet only as a generic editor behavior
+//! reference; its composer contains app-specific code.
+//! Upstream: <https://github.com/zeronsh/comet/blob/main/crates/ui/src/composer.rs>
+//! Reviewed at: <https://github.com/zeronsh/comet/blob/b3fa51872f70c8f973c241b659cf0c166766f4f5/crates/ui/src/composer.rs>
 
 #![allow(
     clippy::cast_possible_truncation,
@@ -13,7 +19,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, Entity,
+    App, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, GlobalElementId, KeyBinding, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
     SharedString, Style, Task, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window,
@@ -68,12 +74,68 @@ actions!(
 
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
+const TEXTAREA_SUBMIT_KEY_CONTEXT: &str = "GpuixTextareaSubmit";
 const CARET_BLINK_MS: u64 = 500;
-const MAX_EDIT_HISTORY_ENTRIES: usize = 256;
+const CARET_WIDTH: Pixels = px(2.0);
+const CARET_HEIGHT_RATIO: f32 = 0.75;
+const DRAG_SCROLL_FRAME_MS: u64 = 16;
+const UNDO_COALESCE: Duration = Duration::from_millis(700);
+const UNDO_LIMIT: usize = 256;
 const MAX_EDIT_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS).is_multiple_of(2)
+}
+
+// Size the bar to cap height, not the line box. Default leading is phi, so a
+// full-height caret sticks out above and below the glyphs. Cap height is about
+// 0.75em; the em square itself still looks taller than the letters.
+fn caret_rect(origin: Point<Pixels>, line_height: Pixels, font_size: Pixels) -> Bounds<Pixels> {
+    let height = (font_size * CARET_HEIGHT_RATIO).min(line_height);
+    let y_offset = (line_height - height) / 2.;
+    Bounds::new(
+        point(origin.x, origin.y + y_offset),
+        size(CARET_WIDTH, height),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressIntent {
+    SelectAll,
+    SelectWord,
+    ExtendSelection,
+    PlaceCaret,
+}
+
+impl PressIntent {
+    fn arms_drag(self) -> bool {
+        matches!(self, Self::ExtendSelection | Self::PlaceCaret)
+    }
+}
+
+fn press_intent(click_count: usize, shift: bool) -> PressIntent {
+    match click_count {
+        n if n >= 3 => PressIntent::SelectAll,
+        2 => PressIntent::SelectWord,
+        _ if shift => PressIntent::ExtendSelection,
+        _ => PressIntent::PlaceCaret,
+    }
+}
+
+fn drag_scroll_delta(
+    pointer_y: f32,
+    viewport_top: f32,
+    viewport_bottom: f32,
+    line_height: f32,
+) -> f32 {
+    let distance = if pointer_y < viewport_top {
+        pointer_y - viewport_top
+    } else if pointer_y > viewport_bottom {
+        pointer_y - viewport_bottom
+    } else {
+        return 0.0;
+    };
+    distance.signum() * (distance.abs() * 0.2).clamp(1.0, line_height)
 }
 
 fn utf16_offset_to_utf8(text: &str, offset: usize) -> usize {
@@ -93,42 +155,26 @@ fn single_line_text(text: &str) -> String {
     text.replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
-fn remap_offset_after_external_edit(old: &str, new: &str, offset: usize) -> usize {
-    let prefix = old
-        .chars()
-        .zip(new.chars())
-        .take_while(|(old, new)| old == new)
-        .map(|(character, _)| character.len_utf8())
-        .sum::<usize>();
-    let suffix = old[prefix..]
-        .chars()
-        .rev()
-        .zip(new[prefix..].chars().rev())
-        .take_while(|(old, new)| old == new)
-        .map(|(character, _)| character.len_utf8())
-        .sum::<usize>();
-    let old_changed_end = old.len().saturating_sub(suffix);
-    let new_changed_end = new.len().saturating_sub(suffix);
-    match offset.min(old.len()) {
-        offset if offset <= prefix => offset,
-        offset if offset >= old_changed_end => {
-            new_changed_end + offset.saturating_sub(old_changed_end)
-        }
-        _ => new_changed_end,
-    }
-}
-
 pub fn init(cx: &mut App) {
     let word_navigation_uses_alt = word_navigation_uses_alt();
     let bind_paste_shortcut = !cfg!(all(target_arch = "wasm32", target_os = "unknown"));
     let mut bindings = text_editor_bindings(
         INPUT_KEY_CONTEXT,
         false,
+        true,
         word_navigation_uses_alt,
         bind_paste_shortcut,
     );
     bindings.extend(text_editor_bindings(
         TEXTAREA_KEY_CONTEXT,
+        true,
+        false,
+        word_navigation_uses_alt,
+        bind_paste_shortcut,
+    ));
+    bindings.extend(text_editor_bindings(
+        TEXTAREA_SUBMIT_KEY_CONTEXT,
+        true,
         true,
         word_navigation_uses_alt,
         bind_paste_shortcut,
@@ -136,15 +182,22 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(bindings);
 }
 
+// These flags are independent platform and editor capabilities.
+#[allow(clippy::fn_params_excessive_bools)]
 fn text_editor_bindings(
     context: &'static str,
     multiline: bool,
+    enter_submits: bool,
     word_navigation_uses_alt: bool,
     bind_paste_shortcut: bool,
 ) -> Vec<KeyBinding> {
     let context = Some(context);
     let mut bindings = vec![
-        KeyBinding::new("enter", Submit, context),
+        if enter_submits {
+            KeyBinding::new("enter", Submit, context)
+        } else {
+            KeyBinding::new("enter", Newline, context)
+        },
         KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("backspace", Backspace, context),
         KeyBinding::new("delete", Delete, context),
@@ -212,7 +265,7 @@ fn text_editor_bindings(
     bindings
 }
 
-#[cfg(any(test, all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(any(test, target_family = "wasm"))]
 fn browser_platform_is_macos(platform: &str, user_agent: &str) -> bool {
     platform.starts_with("Mac")
         || user_agent.contains("Macintosh")
@@ -318,9 +371,6 @@ impl CustomElement for TextEditorElement {
                 let min_rows = self.min_rows;
                 let max_rows = self.max_rows;
                 let caret_color = self.theme.caret;
-                let placeholder_color = self.theme.text_faint;
-                let mut selection_color = self.theme.accent;
-                selection_color.a = 0.35;
                 let callback = callback.clone();
                 let id = ctx.id;
                 let cursor = value.len();
@@ -343,27 +393,27 @@ impl CustomElement for TextEditorElement {
                     selection_reversed: false,
                     marked_range: None,
                     is_selecting: false,
+                    drag_position: None,
+                    drag_generation: 0,
+                    drag_autoscroll_active: false,
                     scroll_top: 0.0,
                     scroll_left: 0.0,
                     follow_cursor: true,
                     last_lines: Vec::new(),
                     line_starts: vec![0],
-                    line_y_offsets: vec![px(0.0)],
                     last_bounds: None,
                     line_height: px(20.0),
+                    font_size: px(16.0),
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
                     caret_color,
-                    placeholder_color,
-                    selection_color,
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
                     undo_stack: VecDeque::new(),
                     redo_stack: VecDeque::new(),
-                    undo_bytes: 0,
-                    redo_bytes: 0,
+                    last_edit: None,
                 })
             })
             .clone();
@@ -372,7 +422,10 @@ impl CustomElement for TextEditorElement {
         state.update(cx, |state, cx| {
             state.callback = callback;
             state.emits_change = emits_change;
-            state.emits_submit = emits_submit;
+            if state.emits_submit != emits_submit {
+                state.emits_submit = emits_submit;
+                cx.notify();
+            }
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
             state.placeholder = self.placeholder.clone().into();
@@ -383,16 +436,13 @@ impl CustomElement for TextEditorElement {
                 state.caret_color = self.theme.caret;
                 cx.notify();
             }
-            state.placeholder_color = self.theme.text_faint;
-            state.selection_color = self.theme.accent;
-            state.selection_color.a = 0.35;
             if prop_changed {
                 state.sync_prop_value(self.value.clone(), cx);
             }
         });
         self.last_prop_value = Some(self.value.clone());
 
-        let element_id = super::custom_element_id("__gpui_vue_editor", ctx.id);
+        let element_id = super::custom_element_id("gpui_editor", ctx.id);
         let mut editor = div()
             .id(element_id)
             .flex()
@@ -400,8 +450,16 @@ impl CustomElement for TextEditorElement {
             .w_full()
             .track_focus(&focus_handle)
             .child(state);
+        // Single-line inputs center text vertically when given extra height.
+        if !self.multiline {
+            editor = editor.items_center();
+        }
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_interactive_styles(editor, style);
+            // Clip text to rounded corners, matching HTML input behavior.
+            if style.border_radius.is_some() {
+                editor = editor.overflow_hidden();
+            }
         }
         if ctx
             .style
@@ -409,6 +467,18 @@ impl CustomElement for TextEditorElement {
             .is_none()
         {
             editor = editor.relative();
+        }
+        let default_role = if self.multiline {
+            gpui::Role::MultilineTextInput
+        } else {
+            gpui::Role::TextInput
+        };
+        editor = crate::accessibility::apply_accessibility(editor, ctx.props, Some(default_role));
+        if ctx.props.get("aria-valuetext").is_none() && !self.value.is_empty() {
+            editor = editor.aria_value(self.value.clone());
+        }
+        if !self.placeholder.is_empty() {
+            editor = editor.aria_placeholder(self.placeholder.clone());
         }
         // Custom elements paint themselves, so nothing registers their box for
         // automation unless the builder does it. Without this, a locator on an
@@ -422,15 +492,26 @@ impl CustomElement for TextEditorElement {
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
-            editor = editor.on_click(move |event, _window, _cx| {
+            // Match retained hosts: GPUI's semantic click is unreliable under
+            // embedded AppKit pumping, so primary mouse-up is the click boundary.
+            editor = editor.on_mouse_up(MouseButton::Left, move |event, _window, _cx| {
                 emit_event_full(&callback, id, "click", |payload| {
-                    let (x, y) = crate::renderer::point_to_xy(event.position());
+                    let (x, y) = crate::renderer::point_to_xy(event.position);
                     payload.x = Some(x);
                     payload.y = Some(y);
-                    payload.modifiers = Some(event.modifiers().into());
+                    payload.button = Some(0);
+                    payload.click_count = Some(event.click_count as u32);
+                    payload.modifiers = Some(event.modifiers.into());
+                    payload.is_right_click = Some(false);
                 });
             });
         }
+        editor = crate::accessibility::apply_a11y_click(
+            editor,
+            ctx.events,
+            ctx.id,
+            ctx.event_callback.as_ref(),
+        );
         editor.into_any_element()
     }
 
@@ -480,10 +561,89 @@ struct EditSnapshot {
     selection_reversed: bool,
 }
 
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "independent editor capabilities and event subscriptions are explicit state flags"
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    Insert,
+    DeleteBackward,
+    DeleteForward,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CoalescingEdit {
+    kind: EditKind,
+    anchor: usize,
+}
+
+#[derive(Clone, Copy)]
+struct LastEdit {
+    edit: CoalescingEdit,
+    when: Instant,
+}
+
+fn coalescing_edit(
+    range: &Range<usize>,
+    new_text: &str,
+    selection_reversed: bool,
+) -> Option<CoalescingEdit> {
+    if new_text.is_empty() {
+        if range.is_empty() {
+            return None;
+        }
+        return Some(CoalescingEdit {
+            kind: if selection_reversed {
+                EditKind::DeleteBackward
+            } else {
+                EditKind::DeleteForward
+            },
+            anchor: range.start,
+        });
+    }
+
+    let mut characters = new_text.chars();
+    let character = characters.next()?;
+    (range.is_empty() && characters.next().is_none() && !character.is_whitespace()).then_some(
+        CoalescingEdit {
+            kind: EditKind::Insert,
+            anchor: range.start + new_text.len(),
+        },
+    )
+}
+
+fn edits_coalesce(
+    previous: CoalescingEdit,
+    current: Option<CoalescingEdit>,
+    range: &Range<usize>,
+    elapsed: Duration,
+) -> bool {
+    let Some(current) = current else {
+        return false;
+    };
+    if previous.kind != current.kind || elapsed >= UNDO_COALESCE {
+        return false;
+    }
+    match current.kind {
+        EditKind::Insert | EditKind::DeleteForward => range.start == previous.anchor,
+        EditKind::DeleteBackward => range.end == previous.anchor,
+    }
+}
+
+fn push_undo_snapshot(history: &mut VecDeque<EditSnapshot>, snapshot: EditSnapshot) {
+    let mut bytes = history
+        .iter()
+        .map(|entry| entry.content.len())
+        .sum::<usize>()
+        + snapshot.content.len();
+    history.push_back(snapshot);
+    while history.len() > UNDO_LIMIT || bytes > MAX_EDIT_HISTORY_BYTES {
+        let Some(removed) = history.pop_front() else {
+            break;
+        };
+        bytes = bytes.saturating_sub(removed.content.len());
+    }
+}
+
+// Event subscriptions and editing modes are independent flags.
+#[allow(clippy::struct_excessive_bools)]
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
@@ -502,27 +662,27 @@ struct TextEditorState {
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
     is_selecting: bool,
+    drag_position: Option<Point<Pixels>>,
+    drag_generation: u64,
+    drag_autoscroll_active: bool,
     scroll_top: f32,
     scroll_left: f32,
     follow_cursor: bool,
     last_lines: Vec<WrappedLine>,
     line_starts: Vec<usize>,
-    line_y_offsets: Vec<Pixels>,
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
+    font_size: Pixels,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
     caret_color: gpui::Hsla,
-    placeholder_color: gpui::Hsla,
-    selection_color: gpui::Hsla,
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: VecDeque<EditSnapshot>,
-    undo_bytes: usize,
-    redo_bytes: usize,
+    last_edit: Option<LastEdit>,
 }
 
 impl TextEditorState {
@@ -559,43 +719,6 @@ impl TextEditorState {
         }
     }
 
-    fn push_history(
-        stack: &mut VecDeque<EditSnapshot>,
-        retained_bytes: &mut usize,
-        snapshot: EditSnapshot,
-    ) {
-        *retained_bytes = retained_bytes.saturating_add(snapshot.content.len());
-        stack.push_back(snapshot);
-        while stack.len() > MAX_EDIT_HISTORY_ENTRIES || *retained_bytes > MAX_EDIT_HISTORY_BYTES {
-            let Some(discarded) = stack.pop_front() else {
-                break;
-            };
-            *retained_bytes = retained_bytes.saturating_sub(discarded.content.len());
-        }
-    }
-
-    fn pop_history(
-        stack: &mut VecDeque<EditSnapshot>,
-        retained_bytes: &mut usize,
-    ) -> Option<EditSnapshot> {
-        let snapshot = stack.pop_back()?;
-        *retained_bytes = retained_bytes.saturating_sub(snapshot.content.len());
-        Some(snapshot)
-    }
-
-    fn clear_redo_history(&mut self) {
-        self.redo_stack.clear();
-        self.redo_bytes = 0;
-    }
-
-    fn push_undo(&mut self, snapshot: EditSnapshot) {
-        Self::push_history(&mut self.undo_stack, &mut self.undo_bytes, snapshot);
-    }
-
-    fn push_redo(&mut self, snapshot: EditSnapshot) {
-        Self::push_history(&mut self.redo_stack, &mut self.redo_bytes, snapshot);
-    }
-
     fn sync_prop_value(&mut self, value: String, cx: &mut Context<Self>) {
         if let Some(index) = self
             .pending_values
@@ -613,17 +736,18 @@ impl TextEditorState {
         if self.content == value {
             return;
         }
-        let old_content = std::mem::replace(&mut self.content, value);
-        let map_offset =
-            |offset| remap_offset_after_external_edit(&old_content, &self.content, offset);
-        self.selected_range =
-            map_offset(self.selected_range.start)..map_offset(self.selected_range.end);
-        self.marked_range = self
-            .marked_range
-            .as_ref()
-            .map(|range| map_offset(range.start)..map_offset(range.end));
+        self.content = value;
+        let end = self.content.len();
+        self.selected_range = end..end;
+        self.selection_reversed = false;
+        self.marked_range = None;
+        self.scroll_top = 0.0;
+        self.scroll_left = 0.0;
         self.follow_cursor = true;
         self.reset_blink(cx);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.last_edit = None;
         cx.notify();
     }
 
@@ -653,9 +777,28 @@ impl TextEditorState {
         self.selection_reversed = snapshot.selection_reversed;
         self.marked_range = None;
         self.follow_cursor = true;
+        self.last_edit = None;
         self.reset_blink(cx);
         self.emit_change();
         cx.notify();
+    }
+
+    fn record_edit(&mut self, range: &Range<usize>, new_text: &str, now: Instant) {
+        let current = coalescing_edit(range, new_text, self.selection_reversed);
+        let mergeable = self.last_edit.is_some_and(|previous| {
+            edits_coalesce(
+                previous.edit,
+                current,
+                range,
+                now.duration_since(previous.when),
+            )
+        });
+        if !mergeable {
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
+        }
+        self.redo_stack.clear();
+        self.last_edit = current.map(|edit| LastEdit { edit, when: now });
     }
 
     fn cursor_offset(&self) -> usize {
@@ -975,9 +1118,9 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
-        if let Some(previous) = Self::pop_history(&mut self.undo_stack, &mut self.undo_bytes) {
-            let current = self.snapshot();
-            self.push_redo(current);
+        if let Some(previous) = self.undo_stack.pop_back() {
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.redo_stack, snapshot);
             self.restore(previous, cx);
         }
     }
@@ -986,9 +1129,9 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
-        if let Some(next) = Self::pop_history(&mut self.redo_stack, &mut self.redo_bytes) {
-            let current = self.snapshot();
-            self.push_undo(current);
+        if let Some(next) = self.redo_stack.pop_back() {
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
             self.restore(next, cx);
         }
     }
@@ -1016,48 +1159,41 @@ impl TextEditorState {
     }
 
     fn point_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        let line_index = self
-            .line_starts
-            .partition_point(|line_start| *line_start <= index)
-            .saturating_sub(1)
-            .min(self.last_lines.len().saturating_sub(1));
-        let line = self.last_lines.get(line_index)?;
-        let line_start = *self.line_starts.get(line_index)?;
-        let local = line.position_for_index(
-            index.saturating_sub(line_start).min(line.len()),
-            self.line_height,
-        )?;
-        Some(point(
-            local.x,
-            local.y + self.line_y_offsets.get(line_index).copied()?,
-        ))
+        for (line_index, line) in self.last_lines.iter().enumerate() {
+            let line_start = *self.line_starts.get(line_index)?;
+            if index < line_start || index > line_start + line.len() {
+                continue;
+            }
+            let local = line.position_for_index(index - line_start, self.line_height)?;
+            let y_offset: Pixels = self
+                .last_lines
+                .iter()
+                .take(line_index)
+                .map(|line| line.size(self.line_height).height)
+                .sum();
+            return Some(point(local.x, local.y + y_offset));
+        }
+        None
     }
 
     fn index_for_point(&self, position: Point<Pixels>) -> usize {
         if self.display_is_placeholder {
             return 0;
         }
-        let y = f32::from(position.y).max(0.0);
-        let line_index = self
-            .line_y_offsets
-            .partition_point(|offset| f32::from(*offset) <= y)
-            .saturating_sub(1)
-            .min(self.last_lines.len().saturating_sub(1));
-        let Some(line) = self.last_lines.get(line_index) else {
-            return self.content.len();
-        };
-        let line_top = self
-            .line_y_offsets
-            .get(line_index)
-            .copied()
-            .map(f32::from)
-            .unwrap_or_default();
-        let height = f32::from(line.size(self.line_height).height);
-        let local = point(position.x, px((y - line_top).min(height - 1.0).max(0.0)));
-        let index = line
-            .closest_index_for_position(local, self.line_height)
-            .unwrap_or_else(|index| index);
-        (self.line_starts.get(line_index).copied().unwrap_or(0) + index).min(self.content.len())
+        let mut y = f32::from(position.y).max(0.0);
+        for (line_index, line) in self.last_lines.iter().enumerate() {
+            let height = f32::from(line.size(self.line_height).height);
+            let line_start = self.line_starts.get(line_index).copied().unwrap_or(0);
+            if y < height || line_index + 1 == self.last_lines.len() {
+                let local = point(position.x, px(y.min(height - 1.0).max(0.0)));
+                let index = line
+                    .closest_index_for_position(local, self.line_height)
+                    .unwrap_or_else(|index| index);
+                return (line_start + index).min(self.content.len());
+            }
+            y -= height;
+        }
+        self.content.len()
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
@@ -1080,25 +1216,124 @@ impl TextEditorState {
             window.request_text_input();
         }
         window.focus(&self.focus_handle, cx);
-        self.is_selecting = true;
-        let index = self.index_for_mouse_position(event.position);
-        if event.modifiers.shift {
-            self.select_to(index, cx);
-        } else {
-            self.move_to(index, cx);
+        let intent = press_intent(event.click_count, event.modifiers.shift);
+        self.is_selecting = intent.arms_drag();
+        self.drag_position = intent.arms_drag().then_some(event.position);
+        self.drag_generation = self.drag_generation.wrapping_add(1);
+        self.drag_autoscroll_active = false;
+        match intent {
+            PressIntent::SelectAll => {
+                self.move_to(0, cx);
+                self.select_to(self.content.len(), cx);
+            }
+            PressIntent::SelectWord => {
+                let index = self.index_for_mouse_position(event.position);
+                let range = crate::text::selection::word_range(&self.content, index);
+                self.move_to(range.start, cx);
+                self.select_to(range.end, cx);
+            }
+            PressIntent::ExtendSelection => {
+                self.select_to(self.index_for_mouse_position(event.position), cx);
+            }
+            PressIntent::PlaceCaret => {
+                self.move_to(self.index_for_mouse_position(event.position), cx);
+            }
         }
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
+        self.drag_position = None;
+        self.drag_generation = self.drag_generation.wrapping_add(1);
+        self.drag_autoscroll_active = false;
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if self.is_selecting {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+            self.drag_position = Some(event.position);
+            let position = self.drag_selection_position(event.position);
+            self.select_to(self.index_for_mouse_position(position), cx);
+            if self.multiline
+                && self.drag_scroll_delta(event.position) != 0.0
+                && !self.drag_autoscroll_active
+            {
+                self.start_drag_autoscroll(cx);
+            }
         }
     }
 
+    fn start_drag_autoscroll(&mut self, cx: &mut Context<Self>) {
+        self.drag_autoscroll_active = true;
+        let generation = self.drag_generation;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(DRAG_SCROLL_FRAME_MS))
+                    .await;
+                let keep_running = this
+                    .update(cx, |input, cx| input.drag_autoscroll_tick(generation, cx))
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drag_selection_position(&self, position: Point<Pixels>) -> Point<Pixels> {
+        let Some(bounds) = self.last_bounds else {
+            return position;
+        };
+        let x = if self.multiline {
+            position.x.clamp(bounds.left(), bounds.right() - px(0.5))
+        } else {
+            position.x
+        };
+        point(x, position.y.clamp(bounds.top(), bounds.bottom() - px(0.5)))
+    }
+
+    fn drag_scroll_delta(&self, position: Point<Pixels>) -> f32 {
+        let Some(bounds) = self.last_bounds else {
+            return 0.0;
+        };
+        drag_scroll_delta(
+            f32::from(position.y),
+            f32::from(bounds.top()),
+            f32::from(bounds.bottom()),
+            f32::from(self.line_height),
+        )
+    }
+
+    // Exact equality detects a clamped scroll boundary without dropping subpixel moves.
+    #[allow(clippy::float_cmp)]
+    fn drag_autoscroll_tick(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.multiline || !self.is_selecting || self.drag_generation != generation {
+            return false;
+        }
+        let (Some(position), Some(bounds)) = (self.drag_position, self.last_bounds) else {
+            self.drag_autoscroll_active = false;
+            return false;
+        };
+        let delta = self.drag_scroll_delta(position);
+        if delta == 0.0 {
+            self.drag_autoscroll_active = false;
+            return false;
+        }
+        let max_scroll = (self.content_height - f32::from(bounds.size.height)).max(0.0);
+        let next = (self.scroll_top + delta).clamp(0.0, max_scroll);
+        if next == self.scroll_top {
+            self.drag_autoscroll_active = false;
+            return false;
+        }
+        self.scroll_top = next;
+        let edge_position = self.drag_selection_position(position);
+        self.select_to(self.index_for_mouse_position(edge_position), cx);
+        self.follow_cursor = false;
+        true
+    }
+
+    #[allow(clippy::float_cmp)]
     fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -1114,7 +1349,14 @@ impl TextEditorState {
             return;
         }
         let delta = f32::from(event.delta.pixel_delta(self.line_height).y);
-        self.scroll_top = (self.scroll_top - delta).clamp(0.0, max_scroll);
+        let next = (self.scroll_top - delta).clamp(0.0, max_scroll);
+        if next == self.scroll_top {
+            if delta != 0.0 {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        self.scroll_top = next;
         self.follow_cursor = false;
         cx.stop_propagation();
         cx.notify();
@@ -1154,9 +1396,6 @@ impl TextEditorState {
         self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
     }
 
-    // Clippy's method-reference rewrite names SmallVec's transitive crate, which is
-    // intentionally not part of this crate's public dependency surface.
-    #[allow(clippy::redundant_closure_for_method_calls)]
     fn layout_text(&mut self, width: Pixels, style: &TextStyle, window: &mut Window) -> f32 {
         let (display, is_placeholder) = if self.content.is_empty() {
             (self.placeholder.clone(), true)
@@ -1164,9 +1403,10 @@ impl TextEditorState {
             (SharedString::from(self.content.clone()), false)
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
+        self.font_size = font_size;
         self.line_height = window.line_height();
         let color = if is_placeholder {
-            self.placeholder_color
+            gpui::rgba(0x8f8f8fff).into()
         } else {
             style.color
         };
@@ -1194,26 +1434,25 @@ impl TextEditorState {
             _ => vec![run(display.len(), false)],
         };
         let wrap_width = self.multiline.then_some(width);
-        let lines = window
+        let lines: Vec<_> = window
             .text_system()
             .shape_text(display, font_size, &runs, wrap_width, None)
-            .map(|lines| lines.into_vec())
+            .map(|ranges| ranges.into_iter().collect())
             .unwrap_or_default();
         let mut line_starts = Vec::with_capacity(lines.len());
-        let mut line_y_offsets = Vec::with_capacity(lines.len());
         let mut offset = 0;
-        let mut y_offset = 0.0;
         for line in &lines {
             line_starts.push(offset);
-            line_y_offsets.push(px(y_offset));
             offset += line.len() + 1;
-            y_offset += f32::from(line.size(self.line_height).height);
         }
         if line_starts.is_empty() {
             line_starts.push(0);
-            line_y_offsets.push(px(0.0));
         }
-        self.content_height = y_offset.max(f32::from(self.line_height));
+        self.content_height = lines
+            .iter()
+            .map(|line| f32::from(line.size(self.line_height).height))
+            .sum::<f32>()
+            .max(f32::from(self.line_height));
         self.content_width = lines
             .iter()
             .map(|line| f32::from(line.unwrapped_layout.width))
@@ -1221,7 +1460,6 @@ impl TextEditorState {
         self.display_is_placeholder = is_placeholder;
         self.last_lines = lines;
         self.line_starts = line_starts;
-        self.line_y_offsets = line_y_offsets;
         self.content_height
     }
 
@@ -1307,16 +1545,14 @@ impl EntityInputHandler for TextEditorState {
             .map(|range| self.range_from_utf16(range))
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
-        if self.marked_range.is_none() {
-            let snapshot = self.snapshot();
-            self.push_undo(snapshot);
-            self.clear_redo_history();
-        }
         let replacement = if self.multiline {
             new_text.to_string()
         } else {
             single_line_text(new_text)
         };
+        if self.marked_range.is_none() {
+            self.record_edit(&range, &replacement, cx.background_executor().now());
+        }
         self.content =
             self.content[..range.start].to_owned() + &replacement + &self.content[range.end..];
         let cursor = range.start + replacement.len();
@@ -1347,8 +1583,9 @@ impl EntityInputHandler for TextEditorState {
             .unwrap_or(self.selected_range.clone());
         if self.marked_range.is_none() {
             let snapshot = self.snapshot();
-            self.push_undo(snapshot);
-            self.clear_redo_history();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
+            self.redo_stack.clear();
+            self.last_edit = None;
         }
         let replacement = if self.multiline {
             new_text.to_string()
@@ -1381,12 +1618,13 @@ impl EntityInputHandler for TextEditorState {
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
         let start = self.point_for_index(range.start)?;
-        Some(Bounds::new(
+        Some(caret_rect(
             point(
                 bounds.left() + start.x - px(self.scroll_left),
                 bounds.top() + start.y - px(self.scroll_top),
             ),
-            size(px(2.0), self.line_height),
+            self.line_height,
+            self.font_size,
         ))
     }
 
@@ -1427,10 +1665,12 @@ impl gpui::Render for TextEditorState {
         let key_up_callback = self.callback.clone();
         let element_id = self.element_id;
         div()
-            .key_context(if self.multiline {
-                TEXTAREA_KEY_CONTEXT
-            } else {
+            .key_context(if !self.multiline {
                 INPUT_KEY_CONTEXT
+            } else if self.emits_submit {
+                TEXTAREA_SUBMIT_KEY_CONTEXT
+            } else {
+                TEXTAREA_KEY_CONTEXT
             })
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)
@@ -1471,7 +1711,6 @@ impl gpui::Render for TextEditorState {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .when(self.emits_key_down, move |editor| {
                 editor.on_key_down(move |event, _window, _cx| {
@@ -1579,9 +1818,10 @@ impl gpui::Element for EditorTextElement {
                 .point_for_index(input.cursor_offset())
                 .unwrap_or(point(px(0.0), px(0.0)));
             caret = Some(fill(
-                Bounds::new(
+                caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
-                    size(px(2.0), input.line_height),
+                    input.line_height,
+                    input.font_size,
                 ),
                 input.caret_color,
             ));
@@ -1589,7 +1829,7 @@ impl gpui::Element for EditorTextElement {
             input.point_for_index(input.selected_range.start),
             input.point_for_index(input.selected_range.end),
         ) {
-            let color = input.selection_color;
+            let color = gpui::rgba(0x7c86ff59);
             if start.y == end.y {
                 selection.push(fill(
                     Bounds::from_corners(
@@ -1643,6 +1883,12 @@ impl gpui::Element for EditorTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) {
+                input.update(cx, |input, cx| input.on_mouse_move(event, cx));
+            }
+        });
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             for quad in prepaint.selection.drain(..) {
                 window.paint_quad(quad);
@@ -1710,7 +1956,7 @@ mod tests {
 
     #[test]
     fn macos_word_navigation_uses_alt() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true, true);
 
         assert!(has_binding(&bindings, "alt-left", &WordLeft));
         assert!(has_binding(&bindings, "alt-right", &WordRight));
@@ -1720,7 +1966,7 @@ mod tests {
 
     #[test]
     fn non_macos_word_navigation_uses_control() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, false, true);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, false, true);
 
         assert!(has_binding(&bindings, "ctrl-left", &WordLeft));
         assert!(has_binding(&bindings, "ctrl-right", &WordRight));
@@ -1730,7 +1976,7 @@ mod tests {
 
     #[test]
     fn browser_paste_stays_with_the_dom_event() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, false);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true, false);
 
         assert!(!has_binding(&bindings, "cmd-v", &Paste));
         assert!(!has_binding(&bindings, "ctrl-v", &Paste));
@@ -1738,10 +1984,27 @@ mod tests {
 
     #[test]
     fn desktop_paste_uses_the_platform_clipboard_action() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true, true);
 
         assert!(has_binding(&bindings, "cmd-v", &Paste));
         assert!(has_binding(&bindings, "ctrl-v", &Paste));
+    }
+
+    #[test]
+    fn textarea_enter_inserts_a_newline_unless_on_submit_is_set() {
+        let textarea = text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, false, true, true);
+        assert!(has_binding(&textarea, "enter", &Newline));
+        assert!(has_binding(&textarea, "shift-enter", &Newline));
+        assert!(!has_binding(&textarea, "enter", &Submit));
+
+        let composer = text_editor_bindings(TEXTAREA_SUBMIT_KEY_CONTEXT, true, true, true, true);
+        assert!(has_binding(&composer, "enter", &Submit));
+        assert!(has_binding(&composer, "shift-enter", &Newline));
+        assert!(!has_binding(&composer, "enter", &Newline));
+
+        let input = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true, true);
+        assert!(has_binding(&input, "enter", &Submit));
+        assert!(!has_binding(&input, "enter", &Newline));
     }
 
     #[test]
@@ -1783,9 +2046,184 @@ mod tests {
     }
 
     #[test]
+    fn caret_matches_the_font_size_inside_the_line() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(16.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(8.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(12.0)));
+        assert_eq!(
+            caret_rect(point(px(0.0), px(0.0)), px(20.0), px(40.0))
+                .size
+                .height,
+            px(20.0)
+        );
+    }
+
+    #[test]
     fn caret_color_comes_from_the_input_theme() {
         let mut input = TextEditorElement::new(false);
         input.set_prop("theme", serde_json::json!({ "caret": "#22c55e" }));
         assert_eq!(input.theme.caret, gpui::rgba(0x22c55eff).into());
+    }
+
+    #[test]
+    fn insertion_undo_coalescing_requires_one_contiguous_non_whitespace_character() {
+        let insert_at_one = CoalescingEdit {
+            kind: EditKind::Insert,
+            anchor: 1,
+        };
+
+        assert_eq!(coalescing_edit(&(0..0), "a", false), Some(insert_at_one));
+        assert!(edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(2..2), "b", false),
+            &(2..2),
+            Duration::from_millis(699),
+        ));
+        assert_eq!(coalescing_edit(&(0..1), "a", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "ab", false), None);
+        assert_eq!(coalescing_edit(&(1..1), " ", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\n", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\t", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\u{2003}", false), None);
+        assert!(!edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            UNDO_COALESCE,
+        ));
+        assert!(!edits_coalesce(
+            CoalescingEdit {
+                kind: EditKind::DeleteBackward,
+                anchor: 1,
+            },
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            Duration::from_millis(1),
+        ));
+        assert!(!edits_coalesce(
+            insert_at_one,
+            None,
+            &(1..1),
+            Duration::from_millis(1),
+        ));
+    }
+
+    #[test]
+    fn backward_and_forward_deletions_use_their_own_contiguity_rules() {
+        let backward = CoalescingEdit {
+            kind: EditKind::DeleteBackward,
+            anchor: 3,
+        };
+        assert_eq!(
+            coalescing_edit(&(2..3), "", true),
+            Some(CoalescingEdit {
+                kind: EditKind::DeleteBackward,
+                anchor: 2,
+            })
+        );
+        assert!(edits_coalesce(
+            backward,
+            coalescing_edit(&(2..3), "", true),
+            &(2..3),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            backward,
+            coalescing_edit(&(1..2), "", true),
+            &(1..2),
+            Duration::from_millis(699),
+        ));
+
+        let forward = CoalescingEdit {
+            kind: EditKind::DeleteForward,
+            anchor: 2,
+        };
+        assert_eq!(coalescing_edit(&(2..3), "", false), Some(forward));
+        assert!(edits_coalesce(
+            forward,
+            coalescing_edit(&(2..3), "", false),
+            &(2..3),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            forward,
+            coalescing_edit(&(3..4), "", false),
+            &(3..4),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            forward,
+            coalescing_edit(&(2..3), "", false),
+            &(2..3),
+            UNDO_COALESCE,
+        ));
+        assert_eq!(coalescing_edit(&(2..2), "", false), None);
+    }
+
+    #[test]
+    fn undo_history_discards_only_the_oldest_snapshot_at_the_limit() {
+        let mut history = VecDeque::new();
+        for index in 0..=UNDO_LIMIT {
+            push_undo_snapshot(
+                &mut history,
+                EditSnapshot {
+                    content: index.to_string(),
+                    selected_range: index..index,
+                    selection_reversed: false,
+                },
+            );
+        }
+
+        assert_eq!(history.len(), UNDO_LIMIT);
+        assert_eq!(history.front().unwrap().content, "1");
+        assert_eq!(history.back().unwrap().content, UNDO_LIMIT.to_string());
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)] // These fixtures produce exactly representable values.
+    fn drag_autoscroll_is_edge_proportional_and_capped_to_one_line() {
+        let line_height = 20.0;
+        assert_eq!(drag_scroll_delta(200.0, 100.0, 300.0, line_height), 0.0);
+        assert_eq!(drag_scroll_delta(90.0, 100.0, 300.0, line_height), -2.0);
+        assert_eq!(drag_scroll_delta(315.0, 100.0, 300.0, line_height), 3.0);
+        assert_eq!(drag_scroll_delta(-100.0, 100.0, 300.0, line_height), -20.0);
+        assert_eq!(drag_scroll_delta(500.0, 100.0, 300.0, line_height), 20.0);
+    }
+
+    #[test]
+    fn multi_click_selects_word_then_all_and_does_not_arm_drag() {
+        assert_eq!(press_intent(1, false), PressIntent::PlaceCaret);
+        assert_eq!(press_intent(1, true), PressIntent::ExtendSelection);
+        assert_eq!(press_intent(2, false), PressIntent::SelectWord);
+        assert_eq!(press_intent(2, true), PressIntent::SelectWord);
+        assert_eq!(press_intent(3, false), PressIntent::SelectAll);
+        assert!(press_intent(1, false).arms_drag());
+        assert!(press_intent(1, true).arms_drag());
+        assert!(!press_intent(2, false).arms_drag());
+        assert!(!press_intent(3, false).arms_drag());
+    }
+}
+
+#[cfg(test)]
+mod history_budget_tests {
+    use super::*;
+    #[test]
+    fn an_oversized_edit_does_not_escape_the_history_byte_budget() {
+        let mut history = VecDeque::new();
+        push_undo_snapshot(
+            &mut history,
+            EditSnapshot {
+                content: "x".repeat(MAX_EDIT_HISTORY_BYTES + 1),
+                selected_range: 0..0,
+                selection_reversed: false,
+            },
+        );
+        assert!(history.is_empty());
     }
 }

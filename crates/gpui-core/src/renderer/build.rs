@@ -103,6 +103,7 @@ pub(crate) fn build_element(
                 selection: ctx.selection.clone(),
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
+                props: &element.custom_props,
                 highlight_set: inherited.highlight.clone(),
             };
             ctx.custom_registry
@@ -112,6 +113,28 @@ pub(crate) fn build_element(
 
     ctx.inherited = parent_inherited;
     built
+}
+
+fn joined_text_content(
+    tree: &RetainedTree,
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<String> {
+    if let Some(content) = element.content.as_deref().filter(|value| !value.is_empty()) {
+        return Some(content.to_string());
+    }
+    let mut parts = Vec::new();
+    for child_id in &element.children {
+        let Some(child) = tree.elements.get(child_id) else {
+            continue;
+        };
+        if child.element_type == "text"
+            && let Some(content) = child.content.as_deref()
+        {
+            parts.push(content);
+        }
+    }
+    let joined = parts.concat();
+    (!joined.is_empty()).then_some(joined)
 }
 
 #[allow(
@@ -249,12 +272,16 @@ fn build_virtual_list(
         };
         view.build_virtual_child(list_id, index, child_id, inherited.clone(), window, cx)
     });
-    let mut list =
-        gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
+    let mut list = gpui::list(list_state, render_item)
+        .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
+        .id(super::super::custom_elements::custom_element_id(
+            "gpui_virtual_list",
+            element.id,
+        ));
     if let Some(style) = element.style.as_deref() {
         list = apply_styles(list, style);
     }
-    list.into_any_element()
+    crate::accessibility::apply_accessibility(list, &element.custom_props, None).into_any_element()
 }
 
 pub(super) fn unmounted_virtual_row(height: f32) -> gpui::AnyElement {
@@ -385,10 +412,45 @@ pub(crate) fn build_host_container(
         el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
     }
 
+    let is_text_host = element.element_type == "text" && element.content.is_none();
+    let default_role = is_text_host.then_some(gpui::Role::Label);
+    el = crate::accessibility::apply_accessibility(el, &element.custom_props, default_role);
+    if is_text_host
+        && !element.custom_props.contains_key("aria-valuetext")
+        && let Some(content) = joined_text_content(ctx.tree, element)
+    {
+        el = el.aria_value(content);
+    }
+
     // Wire up events.
-    // Some events (on_hover, on_click) require a stateful element (.id()),
+    // Some events (on_hover, on_aux_click) require a stateful element (.id()),
     // which we already set above. Others (on_mouse_down, on_key_down) work
     // on any InteractiveElement.
+    if element.events.contains("click") {
+        let id = element.id;
+        let callback = ctx.event_callback.clone();
+        // GPUI's higher-level on_click gesture is not finalized by the
+        // embedded macOS pump. Bubble listeners run in reverse registration
+        // order, so attach click first to keep onMouseUp ahead of onClick.
+        el = el.on_mouse_up(gpui::MouseButton::Left, move |mouse_event, _window, _cx| {
+            emit_event_full(&callback, id, "click", |p| {
+                let (x, y) = point_to_xy(mouse_event.position);
+                p.x = Some(x);
+                p.y = Some(y);
+                p.button = Some(0);
+                p.modifiers = Some(mouse_event.modifiers.into());
+                p.click_count = Some(mouse_event.click_count as u32);
+                p.is_right_click = Some(false);
+            });
+        });
+        el = crate::accessibility::apply_a11y_click(
+            el,
+            &element.events,
+            id,
+            ctx.event_callback.as_ref(),
+        );
+    }
+
     for event_type in element.events.iter() {
         let id = element.id;
         let callback = ctx.event_callback.clone();
@@ -396,19 +458,6 @@ pub(crate) fn build_host_container(
             // ── Click ────────────────────────────────────────────
             // Primary button only, like the DOM. Right and middle clicks go to
             // `onAuxClick`, and `onMouseDown` sees every button.
-            "click" => {
-                el = el.on_click(move |click_event, _window, _cx| {
-                    emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = point_to_xy(click_event.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.modifiers = Some(click_event.modifiers().into());
-                        p.click_count = Some(click_event.click_count() as u32);
-                        p.is_right_click = Some(click_event.is_right_click());
-                    });
-                });
-            }
-
             // ── Aux click (non-primary), like the DOM `auxclick` ──
             "auxClick" => {
                 el = el.on_aux_click(move |click_event, _window, _cx| {

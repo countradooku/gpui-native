@@ -38,7 +38,7 @@
     "lint:fix": "oxlint --vue-plugin --fix packages/vue/src packages/vue/test examples web scripts vite.examples.config.mts vite.pages.config.mts",
     "setup:wasm": "bun run scripts/install-wasm-bindgen.mts",
     "test": "bun --filter @gpui-native/vue test && cargo test --workspace --all-features",
-    "test:native": "bun run scripts/native-smoke.mts",
+    "test:native": "bun run scripts/native-smoke.mts && bun packages/vue/test/native-upstream.mts",
     "typecheck": "bun --filter @gpui-native/vue typecheck && bun --filter '@gpui-vue/example-*' typecheck && bun packages/vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json"
   },
   "devDependencies": {

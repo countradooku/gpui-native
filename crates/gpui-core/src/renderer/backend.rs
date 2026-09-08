@@ -38,9 +38,10 @@ impl Backend for GpuiRenderer {
             .map_err(|_| Error::from_reason("The GPUI UI thread is not running"))
     }
 
+    #[allow(clippy::too_many_lines)] // Platform dispatch paths share one automation contract.
     fn dispatch_mouse_input(&self, input: MouseInput) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, cx| match input {
+        return update_window_without_view(move |window, cx| match input {
             MouseInput::Click {
                 x,
                 y,
@@ -65,7 +66,7 @@ impl Backend for GpuiRenderer {
                 pressed_button,
                 modifiers,
             } => {
-                crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers)
+                crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
             }
             MouseInput::Wheel {
                 x,
@@ -89,43 +90,51 @@ impl Backend for GpuiRenderer {
         }
 
         #[cfg(target_family = "wasm")]
-        return update_web_window(self.web_renderer_id, move |_view, window, cx| match input {
-            MouseInput::Click {
-                x,
-                y,
-                button,
-                modifiers,
-            } => crate::automation::dispatch_click(window, cx, x, y, button, modifiers),
-            MouseInput::Down {
-                x,
-                y,
-                button,
-                modifiers,
-            } => crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers),
-            MouseInput::Up {
-                x,
-                y,
-                button,
-                modifiers,
-            } => crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers),
-            MouseInput::Move {
-                x,
-                y,
-                pressed_button,
-                modifiers,
-            } => {
-                crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers)
-            }
-            MouseInput::Wheel {
-                x,
-                y,
-                delta_x,
-                delta_y,
-                modifiers,
-            } => crate::automation::dispatch_scroll_wheel(
-                window, cx, x, y, delta_x, delta_y, modifiers,
-            ),
-        })
+        return update_web_window_without_view(
+            self.web_renderer_id,
+            move |window, cx| match input {
+                MouseInput::Click {
+                    x,
+                    y,
+                    button,
+                    modifiers,
+                } => crate::automation::dispatch_click(window, cx, x, y, button, modifiers),
+                MouseInput::Down {
+                    x,
+                    y,
+                    button,
+                    modifiers,
+                } => crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers),
+                MouseInput::Up {
+                    x,
+                    y,
+                    button,
+                    modifiers,
+                } => crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers),
+                MouseInput::Move {
+                    x,
+                    y,
+                    pressed_button,
+                    modifiers,
+                } => crate::automation::dispatch_mouse_move(
+                    window,
+                    cx,
+                    x,
+                    y,
+                    pressed_button,
+                    modifiers,
+                ),
+                MouseInput::Wheel {
+                    x,
+                    y,
+                    delta_x,
+                    delta_y,
+                    modifiers,
+                } => crate::automation::dispatch_scroll_wheel(
+                    window, cx, x, y, delta_x, delta_y, modifiers,
+                ),
+            },
+        )
         .map(|_| ());
 
         #[cfg(not(any(

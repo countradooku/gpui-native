@@ -2,14 +2,23 @@ import {
   defineComponent,
   h,
   isVNode,
+  shallowRef,
+  onErrorCaptured,
+  onUnmounted,
   type App,
   type Component,
   type VNode,
 } from "@vue/runtime-core"
 
-import { clearEventHandlers, subscribeRendererEvent } from "./events.js"
+import {
+  clearEventHandlers,
+  subscribeRendererEvent,
+  registerEventHandler,
+  unregisterEventHandlers,
+} from "./events.js"
 import type { NativeRenderer } from "./native.js"
-import { createGpuiRenderer, type GpuiRendererHost } from "./renderer.js"
+import { createGpuiRenderer, allocateRendererId, type GpuiRendererHost } from "./renderer.js"
+import { listenForRuntimeErrors, reportRuntimeError } from "./runtime-errors.js"
 import type { EventPayload, WindowOptions } from "./types.js"
 
 export interface FrameLoop {
@@ -30,6 +39,8 @@ export interface GpuiWindowRoot extends GpuiRoot {
 export interface RenderOptions extends WindowOptions {
   renderer?: NativeRenderer
   frameMs?: number
+  onKeyDown?: (event: EventPayload) => void
+  onKeyUp?: (event: EventPayload) => void
 }
 
 export type DefaultRendererFactory = (onEvent?: (event: EventPayload) => void) => NativeRenderer
@@ -45,6 +56,7 @@ interface RenderSlot {
   host?: GpuiRendererHost
   root?: GpuiRoot
   loop?: FrameLoop
+  onEvent?: (event: EventPayload) => void
 }
 
 export function startFrameLoop(
@@ -109,10 +121,14 @@ export function startFrameLoop(
   const loop = (): void => {
     if (stopped) return
     const started = performance.now()
-    if (renderer.tick?.() === false) {
-      stop()
-      options.onTerminated?.()
-      return
+    try {
+      if (renderer.tick?.() === false) {
+        stop()
+        options.onTerminated?.()
+        return
+      }
+    } catch (error) {
+      reportRuntimeError(renderer, error)
     }
     timer = setTimeout(loop, Math.max(0, frameMs - (performance.now() - started)))
   }
@@ -129,17 +145,79 @@ export function createGpuiRuntime(createDefaultRenderer: DefaultRendererFactory,
     return created
   }
 
-  const rootComponent = (name: string, root: Component | VNode): Component =>
+  const rootComponent = (
+    name: string,
+    root: Component | VNode,
+    renderer: NativeRenderer,
+  ): Component =>
     defineComponent({
       name,
-      setup: () => () => (isVNode(root) ? root : h(root)),
+      setup() {
+        const failure = shallowRef<string>()
+        const showError = (error: unknown): void => {
+          failure.value = error instanceof Error ? (error.stack ?? error.message) : String(error)
+        }
+        const stop = listenForRuntimeErrors(renderer, showError)
+        onUnmounted(stop)
+        onErrorCaptured((error) => {
+          showError(error)
+          return false
+        })
+        return () =>
+          failure.value === undefined
+            ? isVNode(root)
+              ? root
+              : h(root)
+            : h(
+                "div",
+                {
+                  style: {
+                    width: "100%",
+                    height: "100%",
+                    padding: 20,
+                    background: "#240e16",
+                    color: "#ffccd5",
+                    overflow: "scroll",
+                  },
+                  role: "alert",
+                  "aria-label": "Application runtime error",
+                },
+                [
+                  h("text", { style: { fontWeight: 700 } }, "Application runtime error"),
+                  h("text", { style: { fontFamily: "monospace" } }, failure.value),
+                ],
+              )
+      },
     })
+
+  const bindKeys = (
+    renderer: NativeRenderer,
+    down: RenderOptions["onKeyDown"],
+    up: RenderOptions["onKeyUp"],
+  ): (() => void) => {
+    const id = allocateRendererId(renderer)
+    if (down !== undefined) registerEventHandler(id, "windowKeyDown", down, renderer)
+    if (up !== undefined) registerEventHandler(id, "windowKeyUp", up, renderer)
+    renderer.setWindowKeyEvents?.(down !== undefined, up !== undefined, id)
+    return () => {
+      unregisterEventHandlers(id, renderer)
+      renderer.setWindowKeyEvents?.(false, false, id)
+    }
+  }
 
   const render = (root: Component | VNode, options: RenderOptions = {}): GpuiRoot => {
     const slot = renderSlot()
-    const { renderer: injected, onEvent, debugFrameOverlay, frameMs, ...windowOptions } = options
+    const {
+      renderer: injected,
+      onEvent,
+      onKeyDown,
+      onKeyUp,
+      debugFrameOverlay,
+      frameMs,
+      ...windowOptions
+    } = options
     if (slot.renderer === undefined) {
-      slot.renderer = injected ?? createDefaultRenderer(onEvent)
+      slot.renderer = injected ?? createDefaultRenderer((event) => slot.onEvent?.(event))
       if (slot.renderer.isInitialized?.() !== true) slot.renderer.init?.(windowOptions)
       slot.host = createGpuiRenderer(slot.renderer)
     } else if (injected !== undefined && injected !== slot.renderer) {
@@ -152,8 +230,11 @@ export function createGpuiRuntime(createDefaultRenderer: DefaultRendererFactory,
       throw new Error("gpui-vue native host failed to initialize")
     }
     slot.root?.unmount()
+    if (onEvent === undefined) delete slot.onEvent
+    else slot.onEvent = onEvent
+    const unbindKeys = bindKeys(nativeRenderer, onKeyDown, onKeyUp)
     if (debugFrameOverlay !== undefined) nativeRenderer.setDebugFrameOverlay?.(debugFrameOverlay)
-    const app = host.mount(rootComponent("GpuiVueRoot", root))
+    const app = host.mount(rootComponent("GpuiVueRoot", root, nativeRenderer))
 
     let mounted = true
     const mountedRoot: GpuiRoot = {
@@ -163,9 +244,13 @@ export function createGpuiRuntime(createDefaultRenderer: DefaultRendererFactory,
       unmount(): void {
         if (!mounted) return
         mounted = false
+        unbindKeys()
         app.unmount()
         host.flushMutations()
-        if (slot.root === mountedRoot) delete slot.root
+        if (slot.root === mountedRoot) {
+          delete slot.root
+          delete slot.onEvent
+        }
       },
     }
     slot.root = mountedRoot
@@ -180,12 +265,21 @@ export function createGpuiRuntime(createDefaultRenderer: DefaultRendererFactory,
   }
 
   const createWindow = (root: Component | VNode, options: RenderOptions = {}): GpuiWindowRoot => {
-    const { renderer: injected, onEvent, debugFrameOverlay, frameMs, ...windowOptions } = options
+    const {
+      renderer: injected,
+      onEvent,
+      onKeyDown,
+      onKeyUp,
+      debugFrameOverlay,
+      frameMs,
+      ...windowOptions
+    } = options
     const nativeRenderer = injected ?? createDefaultRenderer(onEvent)
     if (nativeRenderer.isInitialized?.() !== true) nativeRenderer.init?.(windowOptions)
     if (debugFrameOverlay !== undefined) nativeRenderer.setDebugFrameOverlay?.(debugFrameOverlay)
     const host = createGpuiRenderer(nativeRenderer)
-    const app = host.mount(rootComponent("GpuiVueWindowRoot", root))
+    const unbindKeys = bindKeys(nativeRenderer, onKeyDown, onKeyUp)
+    const app = host.mount(rootComponent("GpuiVueWindowRoot", root, nativeRenderer))
     const loop =
       injected === undefined
         ? startFrameLoop(nativeRenderer, {
@@ -202,6 +296,7 @@ export function createGpuiRuntime(createDefaultRenderer: DefaultRendererFactory,
       unmount(): void {
         if (!mounted) return
         mounted = false
+        unbindKeys()
         app.unmount()
         host.flushMutations()
       },
