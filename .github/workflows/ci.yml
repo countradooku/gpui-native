@@ -224,3 +224,50 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release-assets/*.node \
             --generate-notes \
             --title "gpui-vue $GITHUB_REF_NAME"
+
+  publish:
+    name: Publish to npm
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - native-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package versions
+        run: |
+          for pkg in packages/gpui-vue packages/gpui-vue-native; do
+            version=$(bun -e "console.log(require('./$pkg/package.json').version)")
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match $pkg version $version"
+              exit 1
+            fi
+          done
+
+      - name: Download native bindings
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bindings-*
+          path: packages/gpui-vue-native
+          merge-multiple: true
+
+      - name: Build Vue package
+        run: bun --filter gpui-vue build
+
+      - name: Publish @gpui-vue/native
+        working-directory: packages/gpui-vue-native
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish gpui-vue
+        working-directory: packages/gpui-vue
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

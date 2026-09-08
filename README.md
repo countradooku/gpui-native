@@ -2,8 +2,30 @@
 
 [![CI](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-vue/actions/workflows/ci.yml)
 [![GitHub Pages](https://github.com/countradooku/gpui-vue/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-vue/)
+[![npm](https://img.shields.io/npm/v/gpui-vue)](https://www.npmjs.com/package/gpui-vue)
 
 Vue 3 bindings for [Zed's GPUI](https://gpui.rs/), implemented as a Vue custom renderer and a full native Rust component runtime.
+
+## Status
+
+gpui-vue is an early `0.1.x` release. Native rendering runs on Apple Silicon
+macOS, x64 Linux (Wayland/X11), and x64 Windows, with a WebAssembly renderer
+backing the browser examples. Every commit passes the full quality gate —
+formatting, Oxlint, TypeScript, `vue-tsc`, clippy with warnings denied, and the
+JavaScript and Rust test suites — plus a native build and headless smoke test
+on all three platforms. The live WebAssembly example gallery deploys to
+[countradooku.github.io/gpui-vue](https://countradooku.github.io/gpui-vue/) on
+every push to `main`.
+
+## Install
+
+```bash
+bun add gpui-vue   # or: npm install gpui-vue
+```
+
+`gpui-vue` depends on `@gpui-vue/native`, which ships prebuilt N-API binaries
+for the three supported targets. On other platforms, build the addon from
+source with `bun --filter @gpui-vue/native build` (see [Build](#build)).
 
 This is a Vue-only monorepo. It has no React or `react-reconciler` dependency:
 
@@ -282,9 +304,11 @@ canvases in the browser example.
 CI runs formatting, clippy with warnings denied, Oxc, Vue, TypeScript, and Rust
 checks plus one native target per OS:
 Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
-`v0.1.0` creates a GitHub Release containing those bindings after each platform
-passes its headless native smoke test and the generated declaration file is
-checked for drift.
+`v0.1.0` creates a GitHub Release containing those bindings and publishes
+`gpui-vue` and `@gpui-vue/native` to npm after each platform passes its
+headless native smoke test and the generated declaration file is checked for
+drift. Publishing requires an `NPM_TOKEN` repository secret with publish
+access to both packages.
 See [`examples/README.md`](./examples/README.md) for runnable canvas,
 chat, motion/timeline, multi-window, audio-buffer, and counter demos. Pass
 `{ headless: true }` to `renderer.init()` when a retained tree is needed
