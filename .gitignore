@@ -11,5 +11,5 @@ dist/
 .idea/
 .vscode/
 coverage/
-packages/gpui-vue-native/index.js
+packages/core/index.js
 .DS_Store

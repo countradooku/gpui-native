@@ -1,7 +1,7 @@
-import { createNativeRenderer } from "../packages/gpui-vue/dist/index.js"
+import { GpuiRenderer } from "../packages/core/index.cjs"
 
 function mountAndClose(label: string): void {
-  const renderer = createNativeRenderer()
+  const renderer = new GpuiRenderer()
   renderer.init({ headless: true })
   renderer.applyBatch(
     JSON.stringify([

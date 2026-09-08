@@ -1,7 +1,7 @@
 import { join } from "node:path"
 
 const repositoryRoot = join(import.meta.dir, "..")
-const manifest = await Bun.file(join(repositoryRoot, "crates/gpui-vue-core/Cargo.toml")).text()
+const manifest = await Bun.file(join(repositoryRoot, "crates/gpui-core/Cargo.toml")).text()
 const version = manifest.match(/^wasm-bindgen\s*=\s*"=([^"]+)"/m)?.[1]
 
 if (!version) throw new Error("Could not read the pinned wasm-bindgen version from Cargo.toml")

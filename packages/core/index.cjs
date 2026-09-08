@@ -1,23 +1,23 @@
-/* First-party native loader for gpui-vue. */
+/* First-party native loader for gpui-native. */
 const { existsSync } = require("node:fs")
 const { join } = require("node:path")
 
 function platformFilename() {
   const platform = process.platform
   const arch = process.arch
-  if (platform === "linux") return `gpui-vue-native.linux-${arch}-gnu.node`
-  if (platform === "darwin") return `gpui-vue-native.darwin-${arch}.node`
-  if (platform === "win32") return `gpui-vue-native.win32-${arch}-msvc.node`
+  if (platform === "linux") return `gpui-native.linux-${arch}-gnu.node`
+  if (platform === "darwin") return `gpui-native.darwin-${arch}.node`
+  if (platform === "win32") return `gpui-native.win32-${arch}-msvc.node`
   return null
 }
 
 function loadBinding() {
-  const requested = process.env.GPUI_VUE_NATIVE_LIBRARY_PATH
+  const requested = process.env.GPUI_NATIVE_LIBRARY_PATH ?? process.env.GPUI_VUE_NATIVE_LIBRARY_PATH
   const filename = platformFilename()
   const candidates = [
     requested,
     filename && join(__dirname, filename),
-    join(__dirname, "gpui-vue-native.node"),
+    join(__dirname, "gpui-native.node"),
   ].filter(Boolean)
 
   const errors = []
@@ -32,7 +32,7 @@ function loadBinding() {
 
   const detail = errors.map((error) => `\n- ${error.message}`).join("")
   throw new Error(
-    `Could not load the first-party gpui-vue native addon for ${process.platform}/${process.arch}. ` +
+    `Could not load the first-party gpui-native addon for ${process.platform}/${process.arch}. ` +
       `Run \"bun --filter @gpui-native/core build\" first.${detail}`,
   )
 }

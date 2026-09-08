@@ -2,7 +2,7 @@ import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 const repositoryRoot = join(import.meta.dir, "..")
-const wasmOutput = join(repositoryRoot, "target/wasm32-unknown-unknown/release/gpui_vue_core.wasm")
+const wasmOutput = join(repositoryRoot, "target/wasm32-unknown-unknown/release/gpui_core.wasm")
 const bindingsOutput = join(repositoryRoot, "web/pkg")
 const viteCli = join(repositoryRoot, "node_modules/vite/bin/vite.js")
 
@@ -28,7 +28,7 @@ await run(
     "--target",
     "wasm32-unknown-unknown",
     "--package",
-    "gpui-vue-core",
+    "gpui-core",
     "--no-default-features",
   ],
   { RUSTC_BOOTSTRAP: "1" },
@@ -42,6 +42,6 @@ await run([
   "--out-dir",
   bindingsOutput,
   "--out-name",
-  "gpui_vue_core",
+  "gpui_core",
 ])
 await run([process.execPath, viteCli, "build", "--config", "vite.pages.config.mts"])

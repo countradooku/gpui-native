@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  APP_NAME: gpui-vue-native
+  APP_NAME: gpui-native
   MACOSX_DEPLOYMENT_TARGET: "10.13"
 
 on:
@@ -70,7 +70,7 @@ jobs:
         run: bun --filter '@gpui-vue/example-*' build
 
       - name: Check WebAssembly renderer
-        run: cargo check --target wasm32-unknown-unknown --package gpui-vue-core --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --package gpui-core --no-default-features
         env:
           RUSTC_BOOTSTRAP: "1"
 
@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep this list identical to `packages/gpui-vue-native/package.json`.
+        # Keep this list identical to `packages/core/package.json`.
         # One architecture per OS avoids rebuilding the full GPUI stack for
         # targets with no demonstrated demand.
         settings:
@@ -145,14 +145,14 @@ jobs:
       # generated declarations intentionally contain additional test APIs.
       - name: Verify production native declarations are current
         if: contains(matrix.settings.target, 'linux')
-        run: git diff --exit-code -- packages/gpui-vue-native/index.d.ts
+        run: git diff --exit-code -- packages/core/index.d.ts
         shell: bash
 
       - name: Upload native binding
         uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: packages/gpui-vue-native/${{ env.APP_NAME }}.*.node
+          path: packages/core/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
           retention-days: 14
 
@@ -185,7 +185,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: packages/gpui-vue-native
+          path: packages/core
 
       - name: Install Linux runtime dependencies
         if: contains(matrix.settings.target, 'linux')
@@ -223,7 +223,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/*.node \
             --generate-notes \
-            --title "gpui-vue $GITHUB_REF_NAME"
+            --title "gpui-native $GITHUB_REF_NAME"
 
   publish:
     name: Publish to npm
@@ -242,7 +242,7 @@ jobs:
 
       - name: Verify tag matches package versions
         run: |
-          for pkg in packages/gpui-vue packages/gpui-vue-native; do
+          for pkg in packages/vue packages/core; do
             version=$(bun -e "console.log(require('./$pkg/package.json').version)")
             if [ "v$version" != "$GITHUB_REF_NAME" ]; then
               echo "Tag $GITHUB_REF_NAME does not match $pkg version $version"
@@ -254,27 +254,27 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: bindings-*
-          path: packages/gpui-vue-native
+          path: packages/core
           merge-multiple: true
 
       - name: Build Vue package
         run: bun --filter @gpui-native/vue build
 
       - name: Publish @gpui-native/core
-        working-directory: packages/gpui-vue-native
+        working-directory: packages/core
         run: bun publish --access public
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @gpui-native/vue
-        working-directory: packages/gpui-vue
+        working-directory: packages/vue
         run: bun publish --access public
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # gpui-vue is a same-content alias of @gpui-native/vue.
       - name: Publish gpui-vue alias
-        working-directory: packages/gpui-vue
+        working-directory: packages/vue
         run: |
           bun -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); pkg.name = 'gpui-vue'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')"
           bun publish --access public

@@ -2,15 +2,15 @@
   "name": "@gpui-native/vue",
   "version": "0.1.0",
   "description": "Vue 3 custom renderer bindings for Zed's GPUI",
-  "homepage": "https://github.com/countradooku/gpui-vue#readme",
+  "homepage": "https://github.com/countradooku/gpui-native#readme",
   "bugs": {
-    "url": "https://github.com/countradooku/gpui-vue/issues"
+    "url": "https://github.com/countradooku/gpui-native/issues"
   },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/countradooku/gpui-vue.git",
-    "directory": "packages/gpui-vue"
+    "url": "git+https://github.com/countradooku/gpui-native.git",
+    "directory": "packages/vue"
   },
   "files": [
     "dist"
@@ -53,7 +53,7 @@
     }
   },
   "scripts": {
-    "build": "bun run ../../scripts/build-gpui-vue.mts",
+    "build": "bun run ../../scripts/build-vue.mts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

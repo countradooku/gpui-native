@@ -3,8 +3,8 @@
   "ignorePatterns": [
     "**/dist/**",
     "**/node_modules/**",
-    "packages/gpui-vue-native/index.cjs",
-    "packages/gpui-vue-native/index.d.ts"
+    "packages/core/index.cjs",
+    "packages/core/index.d.ts"
   ],
   "printWidth": 100,
   "semi": false,

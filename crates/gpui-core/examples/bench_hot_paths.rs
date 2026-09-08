@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-use gpui_vue_core::{GpuiRenderer, WindowOptions};
+use gpui_core::{GpuiRenderer, WindowOptions};
 
 const NODE_COUNT: usize = 10_000;
 const ROUNDS: usize = 11;

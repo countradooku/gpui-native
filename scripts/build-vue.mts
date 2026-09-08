@@ -4,7 +4,7 @@ import { basename, dirname, join, relative } from "node:path"
 import { transformSync } from "oxc-transform"
 
 const repositoryRoot = join(import.meta.dir, "..")
-const packageRoot = join(repositoryRoot, "packages/gpui-vue")
+const packageRoot = join(repositoryRoot, "packages/vue")
 const sourceRoot = join(packageRoot, "src")
 const outputRoot = join(packageRoot, "dist")
 const tsconfigPath = join(packageRoot, "tsconfig.build.json")
