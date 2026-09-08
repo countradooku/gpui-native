@@ -70,21 +70,21 @@ try {
   assert.equal(changed, "hello\n")
   const output = mkdtempSync(join(tmpdir(), "gpui-parity-"))
   try {
-    root.render(
-      h(
-        "text",
-        { style: { fontSize: 24, color: "white", textDecoration: "none" } },
-        "Decorated text",
-      ),
-    )
+    // Windows clears opaque windows to white. Own both colors so this test
+    // measures decorations rather than a platform's default clear color.
+    const decoratedText = (text: string, textDecoration: "none" | "underline") =>
+      h("div", { style: { width: 400, height: 80, padding: 8, background: "#182030" } }, [
+        h("text", { style: { fontSize: 24, color: "white", textDecoration } }, text),
+      ])
+    root.render(decoratedText("", "none"))
+    root.renderer.captureScreenshot(join(output, "empty.png"))
+    root.render(decoratedText("Decorated text", "none"))
     root.renderer.captureScreenshot(join(output, "plain.png"))
-    root.render(
-      h(
-        "text",
-        { style: { fontSize: 24, color: "white", textDecoration: "underline" } },
-        "Decorated text",
-      ),
+    assert(
+      !readFileSync(join(output, "empty.png")).equals(readFileSync(join(output, "plain.png"))),
+      "text must be visible against the explicit background",
     )
+    root.render(decoratedText("Decorated text", "underline"))
     root.renderer.captureScreenshot(join(output, "underline.png"))
     assert(
       !readFileSync(join(output, "plain.png")).equals(readFileSync(join(output, "underline.png"))),
