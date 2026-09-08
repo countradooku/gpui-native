@@ -141,10 +141,10 @@ jobs:
         run: bun --filter @gpui-native/core ${{ matrix.settings.script }} --target ${{ matrix.settings.target }}
         shell: bash
 
-      # macOS and Windows include the target-only GPU test renderer, so their
-      # generated declarations intentionally contain additional test APIs.
-      - name: Verify production native declarations are current
-        if: contains(matrix.settings.target, 'linux')
+      # The committed declarations include the GPU test APIs available on macOS
+      # and Windows. Linux production builds generate a smaller API surface.
+      - name: Verify native declarations are current
+        if: ${{ !contains(matrix.settings.target, 'linux') }}
         run: git diff --exit-code -- packages/core/index.d.ts
         shell: bash
 

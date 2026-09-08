@@ -63,3 +63,8 @@ setups. Existing npm imports (`@gpui-native/core`, `@gpui-native/vue`, and the
 published `gpui-vue` alias) keep their names. The Rust crate is now `gpui-core`
 (`gpui_core` in Rust imports); scripts using the previous crate or artifact
 names must use the new names.
+
+The committed native declarations include `TestGpuiRenderer`, which is available
+only in macOS and Windows builds with `test-support`. Linux production builds
+do not export that class. CI verifies the complete generated declarations on
+the supported test-renderer platforms.
