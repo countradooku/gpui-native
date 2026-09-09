@@ -1,29 +1,33 @@
 /// <reference types="@webgpu/types" preserve="true" />
 
-function assertSupportedHost(): void {
-  if (process.versions.bun) {
-    throw new Error(
-      "Dawn WebGPU requires Node.js: Bun 1.4.0 crashes during asynchronous pipeline creation. Run the built application with node, or supply your own compatible GPU to GPUCanvas.",
-    )
-  }
-}
+import { createRequire } from "node:module"
 
-/** Load Dawn only from a desktop entry point. Keep the returned GPU alive while using its devices. */
+import { globals, wrapAdapter } from "./wgpu-native-objects.js"
+
+/** Create the Rust/wgpu Node-API implementation used by both Bun and Node. */
 export async function createNativeGPU(options: string[] = []): Promise<GPU> {
-  assertSupportedHost()
-  const { create } = await import("webgpu")
-  return create(options)
+  if (options.length)
+    throw new TypeError(
+      "Dawn option strings are unsupported by wgpu; use requestAdapter/requestDevice descriptors",
+    )
+  const { requestWgpuAdapter } = createRequire(import.meta.url)(
+    "@gpui-native/core",
+  ) as typeof import("@gpui-native/core")
+  return {
+    requestAdapter: async (options: GPURequestAdapterOptions = {}) =>
+      wrapAdapter(await requestWgpuAdapter(options)),
+    getPreferredCanvasFormat: () => "bgra8unorm",
+    wgslLanguageFeatures: new Set<string>(),
+  } as unknown as GPU
 }
 
 /**
- * Install Dawn's WebGPU constructors/constants and navigator.gpu for libraries
+ * Install the native wgpu binding's WebGPU constructors/constants and navigator.gpu for libraries
  * such as Three.js. Returns an idempotent restoration function. Explicit opt-in:
  * importing this module never changes globals or loads the native library.
  */
 export async function installWebGPU(options: string[] = []): Promise<() => void> {
-  assertSupportedHost()
-  const { create, globals } = await import("webgpu")
-  const gpu = create(options)
+  const gpu = await createNativeGPU(options)
   const restores: (() => void)[] = []
   const define = (target: object, key: string, value: unknown) => {
     const previous = Object.getOwnPropertyDescriptor(target, key)

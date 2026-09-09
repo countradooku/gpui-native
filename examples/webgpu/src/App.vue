@@ -1,29 +1,10 @@
 <script setup lang="ts">
-import { GpuiCanvas, useGPUCanvas } from "@gpui-native/vue"
-import { onMounted, onScopeDispose, ref } from "vue"
+import { ref } from "vue"
 
-import { startWebGPUScene } from "../../shared/webgpu-scene.js"
-const props = defineProps<{ gpu: GPU }>()
-const canvas = useGPUCanvas({ width: 640, height: 400 })
-const error = ref("")
-let cancelled = false
-let stop: (() => void) | undefined
-onMounted(() => {
-  void startWebGPUScene(canvas, props.gpu, (value) => {
-    error.value = String(value)
-  })
-    .then((dispose) => {
-      if (cancelled) dispose()
-      else stop = dispose
-    })
-    .catch((value) => {
-      if (!cancelled) error.value = String(value)
-    })
-})
-onScopeDispose(() => {
-  cancelled = true
-  stop?.()
-})
+import Canvases from "./Canvases.vue"
+defineProps<{ gpu: GPU }>()
+const visible = ref(true)
+const wide = ref(false)
 </script>
 <template>
   <div
@@ -31,31 +12,30 @@ onScopeDispose(() => {
       width: '100%',
       height: '100%',
       padding: 24,
-      gap: 16,
+      gap: 12,
+      display: 'flex',
       flexDirection: 'column',
       backgroundColor: '#070b17',
       color: '#e8efff',
     }"
   >
-    <text :style="{ fontSize: 26 }">Vue · WebGPU canvas</text>
-    <text>WGSL shaders · 4× antialiasing · bounded asynchronous presentation</text>
-    <GpuiCanvas
-      :source="canvas.id"
-      testId="webgpu-canvas"
-      :style="{ width: 640, height: 400 }"
-      :commands="[
-        {
-          type: 'rect',
-          x: 12,
-          y: 12,
-          width: 616,
-          height: 376,
-          radius: 12,
-          stroke: '#6686b0',
-          strokeWidth: 1,
-        },
-      ]"
-    />
-    <text v-if="error" :style="{ color: '#ff8888' }">{{ error }}</text>
+    <text :style="{ fontSize: 26 }">Vue · shared GPU canvases</text>
+    <div :style="{ display: 'flex', flexDirection: 'row', gap: 12 }">
+      <div
+        role="button"
+        :style="{ padding: 10, backgroundColor: '#23304a', borderRadius: 6 }"
+        @click="visible = !visible"
+      >
+        {{ visible ? "Unmount canvases" : "Mount canvases" }}
+      </div>
+      <div
+        role="button"
+        :style="{ padding: 10, backgroundColor: '#23304a', borderRadius: 6 }"
+        @click="wide = !wide"
+      >
+        Resize canvases
+      </div>
+    </div>
+    <Canvases v-if="visible" :gpu="gpu" :width="wide ? 720 : 480" />
   </div>
 </template>

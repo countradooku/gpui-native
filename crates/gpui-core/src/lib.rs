@@ -9,6 +9,11 @@ mod color;
 mod custom_elements;
 mod diff;
 mod element_tree;
+pub mod gpu;
+#[cfg(not(target_family = "wasm"))]
+mod gpu_binding;
+#[cfg(not(target_family = "wasm"))]
+pub use gpu_binding::{NativeWgpuAdapter, NativeWgpuDevice, request_wgpu_adapter};
 mod gpu_canvas;
 mod markdown;
 mod motion;

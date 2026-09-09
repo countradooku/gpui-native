@@ -16,7 +16,7 @@ it("owns GPU canvas sources in committed React effects and cleans StrictMode rep
   })
   const host = createGpuiRenderer(renderer)
   function App({ width }: { width: number }) {
-    const canvas = useGPUCanvas({ width, height: 20 })
+    const canvas = useGPUCanvas({ width, height: 20, presentation: "async-readback" })
     return canvas && <canvas source={canvas.id} style={{ width, height: 20 }} />
   }
   try {

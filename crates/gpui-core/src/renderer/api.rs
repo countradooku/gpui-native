@@ -76,6 +76,96 @@ impl GpuiRenderer {
             .map_err(Error::from_reason)
     }
 
+    /// Reset published images and invalidate outstanding GPU publications.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn reset_canvas_source(&self, id: u32) -> Result<()> {
+        self.tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .reset(id)
+            .map_err(Error::from_reason)
+    }
+
+    /// GPU snapshot presentation; rejects unsupported platforms and foreign devices.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub async fn present_canvas_texture(
+        &self,
+        id: u32,
+        device: &crate::gpu_binding::NativeWgpuDevice,
+        texture: u32,
+        opaque: bool,
+    ) -> Result<bool> {
+        if cfg!(target_os = "windows") {
+            return Err(Error::from_reason(
+                "DirectX shared texture presentation is not implemented; select async-readback explicitly",
+            ));
+        }
+        let frames = self.tree.lock().canvas_frames.clone();
+        let source = {
+            let frames = frames.lock();
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            if frames
+                .shared_gpu
+                .as_ref()
+                .is_none_or(|engine| !Arc::ptr_eq(&engine.device, &device.engine.device))
+            {
+                return Err(Error::from_reason(
+                    "Linux direct presentation requires this window's shared GPU device",
+                ));
+            }
+            frames
+                .direct
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| Error::from_reason("Unknown or destroyed canvas source"))?
+        };
+        let texture = device.engine.texture(texture).map_err(Error::from_reason)?;
+        let presented = source
+            .present(&device.engine, texture, opaque)
+            .await
+            .map_err(Error::from_reason)?;
+        if presented && *self.initialized.lock() {
+            self.request_invalidate()?;
+        }
+        Ok(presented)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn canvas_presentation(&self) -> String {
+        if cfg!(target_os = "macos") {
+            "metal"
+        } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+            "shared-wgpu"
+        } else {
+            "unsupported"
+        }
+        .into()
+    }
+
+    /// Acquire the Linux compositor device after the window has painted once.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn canvas_gpu_device(&self) -> Option<crate::gpu_binding::NativeWgpuDevice> {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            self.tree
+                .lock()
+                .canvas_frames
+                .lock()
+                .shared_gpu
+                .clone()
+                .map(crate::gpu_binding::NativeWgpuDevice::new)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        {
+            None
+        }
+    }
+
     /// Publish padded RGBA8 or BGRA8 pixels through the binary bridge.
     #[cfg(not(target_family = "wasm"))]
     #[napi]

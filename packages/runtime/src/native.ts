@@ -17,6 +17,17 @@ export type NativeEventCallback = (error: Error | null, event: EventPayload | nu
 
 /** First-party mutation protocol implemented by the Rust `GpuiRenderer`. */
 export interface NativeRenderer {
+  presentCanvasTexture?(
+    id: number,
+    device: unknown,
+    texture: number,
+    opaque: boolean,
+  ): Promise<boolean>
+  resetCanvasSource?(id: number): void
+  canvasPresentation?(): "metal" | "shared-wgpu" | "unsupported"
+  canvasGpuDevice?(): GPUDevice | null
+  createCanvasTexture?(descriptor: GPUTextureDescriptor): { texture: GPUTexture; handle: number }
+  releaseCanvasTexture?(handle: number): void
   createCanvasSource?(): number
   presentCanvasFrame?(
     id: number,

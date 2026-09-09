@@ -178,6 +178,10 @@
       "dependencies": {
         "@gpui-native/runtime": "workspace:^",
         "@webgpu/types": "^0.1.72",
+        "three": "0.185.1",
+      },
+      "devDependencies": {
+        "@types/three": "^0.185.0",
       },
     },
     "examples/webgpu": {
@@ -239,8 +243,6 @@
         "tsx": "^4.20.0",
         "typescript": "^5.9.3",
         "vitest": "^4.0.0",
-      },
-      "optionalDependencies": {
         "webgpu": "0.6.0",
       },
     },

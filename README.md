@@ -384,4 +384,7 @@ The full native component engine is adapted from GPUix's Apache-2.0 native packa
 React and Vue can display real WebGPU rendering through a shared canvas source, with
 WGSL, compute, texture uploads, cube maps, MSAA, and Three.js coverage. See the
 [WebGPU guide](docs/webgpu.md) for runnable examples, lifecycle rules, measured
-readback costs, and current Node/browser requirements.
+transport benchmarks, Bun/Node support, and the tested platform matrix. Direct
+presentation currently requires Metal or GPUI’s shared wgpu device; Windows
+requires explicit readback. This integration is not yet production-qualified on
+all platforms.

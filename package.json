@@ -42,7 +42,9 @@
     "typecheck": "bun run build:adapters && bun --filter @gpui-native/runtime typecheck && bun --filter @gpui-native/react typecheck && bun --filter @gpui-native/vue typecheck && bun --filter '@gpui-*/example-*' typecheck && bun packages/vue/node_modules/typescript/bin/tsc --noEmit -p web/tsconfig.json",
     "build:adapters": "bun --filter @gpui-native/runtime build && bun --filter @gpui-native/vue build && bun --filter @gpui-native/react build",
     "test:webgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:webgpu",
-    "bench:webgpu": "bun --filter @gpui-native/runtime bench:webgpu"
+    "bench:webgpu": "bun --filter @gpui-native/runtime bench:webgpu",
+    "test:wgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:wgpu && bun packages/runtime/test/native-wgpu-lifecycle.mts",
+    "bench:wgpu": "bun --filter @gpui-native/runtime bench:wgpu"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "catalog:",

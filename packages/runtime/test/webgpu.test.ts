@@ -62,7 +62,13 @@ function fixture(maxFramesInFlight = 2) {
     createCommandEncoder: () => ({ copyTextureToBuffer: vi.fn<() => void>(), finish: () => ({}) }),
     queue: { submit: vi.fn<() => void>() },
   } as unknown as GPUDevice
-  const canvas = createGPUCanvas({ renderer, width: 65, height: 2, maxFramesInFlight })
+  const canvas = createGPUCanvas({
+    presentation: "async-readback",
+    renderer,
+    width: 65,
+    height: 2,
+    maxFramesInFlight,
+  })
   canvas.configure({ device, format: "rgba8unorm" })
   return { canvas, device, lost, buffers, textures, publish, destroy }
 }
@@ -163,6 +169,74 @@ describe("GPU canvas lifecycle and backpressure", () => {
     ).toThrow("sRGB")
     expect(f.canvas.getContext("2d")).toBeNull()
     expect(f.canvas.getContext("webgpu").getConfiguration()?.format).toBe("rgba8unorm")
+    f.canvas.destroy()
+  })
+})
+
+describe("shared-device direct transport", () => {
+  function directFixture() {
+    const lost = deferred<GPUDeviceLostInfo>()
+    const device = {
+      lost: lost.promise,
+      features: new Set<string>(),
+      limits: { maxTextureDimension2D: 4096, minUniformBufferOffsetAlignment: 256 },
+    } as unknown as GPUDevice
+    const pending = deferred<boolean>()
+    const reset = vi.fn<(id: number) => void>()
+    const release = vi.fn<(id: number) => void>()
+    const cpu = vi.fn<() => void>()
+    const renderer = Object.assign(new MemoryNativeRenderer(), {
+      createCanvasSource: () => 19,
+      destroyCanvasSource: vi.fn<(id: number) => void>(),
+      presentCanvasFrame: cpu,
+      canvasPresentation: () => "shared-wgpu" as const,
+      canvasGpuDevice: () => device,
+      createCanvasTexture: () => ({
+        texture: { destroy: vi.fn<() => void>() } as unknown as GPUTexture,
+        handle: 4,
+      }),
+      releaseCanvasTexture: release,
+      resetCanvasSource: reset,
+      presentCanvasTexture: vi.fn<() => Promise<boolean>>(() => pending.promise),
+    })
+    const canvas = createGPUCanvas({ renderer, width: 32, height: 32, maxFramesInFlight: 1 })
+    return { canvas, device, pending, reset, release, cpu }
+  }
+
+  it("rejects unsupported shared capabilities and foreign devices", async () => {
+    const f = directFixture()
+    const unusedGPU = {} as GPU
+    await expect(
+      f.canvas.requestDevice(unusedGPU, { requiredFeatures: ["shader-f16"] }),
+    ).rejects.toThrow("shader-f16")
+    await expect(
+      f.canvas.requestDevice(unusedGPU, { requiredLimits: { maxTextureDimension2D: 8192 } }),
+    ).rejects.toThrow("maxTextureDimension2D")
+    await expect(
+      f.canvas.requestDevice(unusedGPU, {
+        requiredLimits: { minUniformBufferOffsetAlignment: 128 },
+      }),
+    ).rejects.toThrow("minUniformBufferOffsetAlignment")
+    expect(await f.canvas.requestDevice(unusedGPU)).toBe(f.device)
+    expect(f.canvas.ownsDevice).toBe(false)
+    expect(() =>
+      f.canvas.configure({ device: { ...f.device } as GPUDevice, format: "rgba8unorm" }),
+    ).toThrow("device")
+    f.canvas.destroy()
+  })
+
+  it("bounds direct requests and cancels publication after reconfiguration", async () => {
+    const f = directFixture()
+    f.canvas.configure({ device: f.device, format: "rgba8unorm" })
+    const first = f.canvas.present()
+    expect(await f.canvas.present()).toBe(false)
+    f.canvas.resize(64, 32)
+    f.pending.resolve(true)
+    expect(await first).toBe(false)
+    expect(f.release).toHaveBeenCalledWith(4)
+    expect(f.reset).toHaveBeenCalled()
+    expect(f.cpu).not.toHaveBeenCalled()
+    expect(f.canvas.stats).toMatchObject({ transport: "gpu-copy", bytesPresented: 0, inFlight: 0 })
     f.canvas.destroy()
   })
 })

@@ -1,0 +1,49 @@
+name: GPU hardware validation
+
+# Opt-in: hosted software adapters are covered by ci.yml. A runner with a real
+# GPU, logged-in display session and the `gpu` label is required here.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        description: Self-hosted GPU runner platform
+        default: macOS
+        options: [macOS, Linux, Windows]
+
+permissions:
+  contents: read
+
+jobs:
+  hardware:
+    runs-on: [self-hosted, gpu, "${{ inputs.platform }}"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build native binding
+        run: bun run build:native
+      - name: Framework and window regression
+        run: bun run test:native
+      - name: Node and Bun asynchronous pipelines and lifecycle
+        run: bun run test:wgpu
+      - name: Compute, textures, MSAA and explicit readback
+        run: bun run test:webgpu
+      - name: Metal direct presentation pixels in Bun
+        if: inputs.platform == 'macOS'
+        run: bun packages/runtime/test/native-webgpu.mts
+        env:
+          GPUI_GPU_PRESENTATION: direct
+      - name: Metal direct presentation pixels in Node
+        if: inputs.platform == 'macOS'
+        working-directory: packages/runtime
+        run: node --import tsx test/native-webgpu.mts
+        env:
+          GPUI_GPU_PRESENTATION: direct
+      # Linux production window composition still requires the manual X11 and
+      # Wayland checks documented in docs/webgpu.md. Windows direct sharing is
+      # not implemented. Neither is implied by this workflow's success.

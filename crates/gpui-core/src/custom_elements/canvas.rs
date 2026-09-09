@@ -204,6 +204,30 @@ impl CustomElement for CanvasElement {
         let drawing = gpui::canvas(
             |_, _, _| (),
             move |bounds, (), window, _| {
+                if let Some(frame) = gpu_source.and_then(|id| canvas_frames.lock().gpu_frame(id)) {
+                    #[cfg(target_os = "macos")]
+                    window.paint_metal_texture(
+                        bounds,
+                        frame.paint.clone(),
+                        frame.opaque,
+                        frame.clone(),
+                    );
+                    #[cfg(any(
+                        target_os = "linux",
+                        target_os = "freebsd",
+                        target_family = "wasm"
+                    ))]
+                    window.paint_gpu_texture(
+                        bounds,
+                        frame.paint.clone(),
+                        gpui::size(
+                            gpui::DevicePixels(frame.texture.width() as i32),
+                            gpui::DevicePixels(frame.texture.height() as i32),
+                        ),
+                        frame.opaque,
+                        Some(frame.clone()),
+                    );
+                }
                 let image = gpu_source.and_then(|id| canvas_frames.lock().image(id));
                 if let Some(image) = image
                     && let Err(error) = window.paint_image(

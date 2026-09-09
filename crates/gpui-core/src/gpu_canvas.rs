@@ -8,12 +8,18 @@ use std::{
 
 use gpui::RenderImage;
 
+static NEXT_SOURCE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Default)]
 pub(crate) struct CanvasFrames {
-    next_id: u32,
+    pub direct: HashMap<u32, Arc<crate::gpu::presentation::DirectSource>>,
+    direct_painting: HashMap<u32, Arc<crate::gpu::presentation::GpuFrame>>,
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm"))]
+    pub shared_gpu: Option<Arc<crate::gpu::GpuEngine>>,
+
     pub active: HashSet<u32>,
     frames: HashMap<u32, Option<Arc<RenderImage>>>,
     painted: HashMap<u32, Arc<RenderImage>>,
@@ -26,12 +32,17 @@ impl CanvasFrames {
         if self.frames.len() >= 256 {
             return Err("at most 256 canvas sources per renderer");
         }
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or("canvas source IDs exhausted")?;
-        self.frames.insert(self.next_id, None);
-        Ok(self.next_id)
+        let id = NEXT_SOURCE_ID
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |id| id.checked_add(1),
+            )
+            .map_err(|_| "canvas source IDs exhausted")?
+            + 1;
+        self.frames.insert(id, None);
+        self.direct.insert(id, Arc::default());
+        Ok(id)
     }
 
     pub fn publish_image(&mut self, id: u32, image: Arc<RenderImage>) -> Result<(), &'static str> {
@@ -70,12 +81,27 @@ impl CanvasFrames {
     }
 
     pub fn destroy(&mut self, id: u32) {
+        if let Some(source) = self.direct.remove(&id) {
+            source.reset(true);
+        }
         if let Some(old) = self.frames.remove(&id) {
             self.bytes -= image_bytes(old.as_ref());
         }
     }
 
     pub fn clear(&mut self) {
+        for source in self.direct.values() {
+            source.reset(true);
+        }
+        self.direct.clear();
+        self.direct_painting.clear();
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm"))]
+        {
+            if let Some(engine) = self.shared_gpu.take() {
+                engine.destroy();
+            }
+        }
+
         self.frames.clear();
         self.painted.clear();
         self.painting.clear();
@@ -87,6 +113,16 @@ impl CanvasFrames {
         // Publication may run concurrently with GPUI painting on Windows/Linux.
         // Freeze one generation for the entire frame so a second canvas using
         // the same source cannot evict an atlas tile already referenced by it.
+        self.direct_painting = self
+            .active
+            .iter()
+            .filter_map(|id| {
+                self.direct
+                    .get(id)
+                    .and_then(|s| s.latest())
+                    .map(|frame| (*id, frame))
+            })
+            .collect();
         self.painting.clear();
         self.painting.extend(self.active.iter().filter_map(|id| {
             self.frames
@@ -98,6 +134,34 @@ impl CanvasFrames {
 
     /// Evict obsolete atlas entries on the window thread, including unmounts.
     pub fn prepare_frame(&mut self, window: &mut gpui::Window) {
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm"))]
+        if window.gpu_device_lost() != Some(true) {
+            if let Some(context) = window
+                .gpu_context()
+                .and_then(|v| v.downcast::<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>().ok())
+            {
+                let (device, queue) = *context;
+                if self.shared_gpu.as_ref().is_none_or(|engine| {
+                    engine.alive().is_err() || !Arc::ptr_eq(&engine.device, &device)
+                }) {
+                    for source in self.direct.values() {
+                        source.reset(false);
+                    }
+                    if let Some(old) = self.shared_gpu.take() {
+                        old.destroy();
+                    }
+                    self.shared_gpu = Some(crate::gpu::GpuEngine::new(device, queue, false));
+                }
+            }
+        } else {
+            for source in self.direct.values() {
+                source.reset(false);
+            }
+            if let Some(old) = self.shared_gpu.take() {
+                old.destroy();
+            }
+        }
+
         self.freeze();
         self.painted.retain(|id, previous| {
             let keep = self.active.contains(id)
@@ -110,6 +174,22 @@ impl CanvasFrames {
             }
             keep
         });
+    }
+
+    pub fn gpu_frame(&self, id: u32) -> Option<Arc<crate::gpu::presentation::GpuFrame>> {
+        self.direct_painting.get(&id).cloned()
+    }
+
+    pub fn reset(&mut self, id: u32) -> Result<(), &'static str> {
+        self.direct
+            .get(&id)
+            .ok_or("Unknown canvas source")?
+            .reset(false);
+        if let Some(old) = self.frames.get_mut(&id) {
+            self.bytes -= image_bytes(old.as_ref());
+            *old = None;
+        }
+        Ok(())
     }
 
     pub fn image(&mut self, id: u32) -> Option<Arc<RenderImage>> {
@@ -278,5 +358,34 @@ mod tests {
         assert_eq!(frames.bytes, 0);
         assert!(frames.frames.get(&id).and_then(Option::as_ref).is_none());
         assert_ne!(frames.create().unwrap(), id);
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[test]
+    fn renderer_source_ids_do_not_alias() {
+        let mut first = CanvasFrames::default();
+        let mut second = CanvasFrames::default();
+        let id = first.create().unwrap();
+        let other = second.create().unwrap();
+        assert_ne!(id, other);
+        assert!(second.reset(id).is_err());
+        first.destroy(id);
+        assert!(first.reset(id).is_err());
+    }
+
+    #[test]
+    fn reset_releases_latest_cpu_frame_and_rejects_stale_sources() {
+        let mut frames = CanvasFrames::default();
+        let id = frames.create().unwrap();
+        frames.publish(id, 1, 1, 4, &[255; 4], false, true).unwrap();
+        frames.reset(id).unwrap();
+        assert_eq!(frames.bytes, 0);
+        assert!(frames.frames[&id].is_none());
+        frames.destroy(id);
+        assert!(frames.publish(id, 1, 1, 4, &[255; 4], false, true).is_err());
     }
 }

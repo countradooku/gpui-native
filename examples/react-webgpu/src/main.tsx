@@ -1,6 +1,7 @@
 import { render } from "@gpui-native/react"
-import { createNativeGPU } from "@gpui-native/react/webgpu-native"
+import { installWebGPU } from "@gpui-native/react/webgpu-native"
 
 import App from "./App.js"
-const gpu = await createNativeGPU()
-render(<App gpu={gpu} />, { title: "GPUI React WebGPU", width: 700, height: 540 })
+await installWebGPU()
+const gpu = navigator.gpu
+render(<App gpu={gpu} />, { title: "GPUI React WebGPU", width: 820, height: 840 })

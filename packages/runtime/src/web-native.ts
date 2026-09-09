@@ -44,6 +44,31 @@ export class WebNativeRenderer extends MutationRenderer implements NativeRendere
     this.#onEvent = onEvent
   }
 
+  canvasPresentation(): "shared-wgpu" {
+    return "shared-wgpu"
+  }
+  canvasGpuDevice(): GPUDevice | null {
+    return this.#wasm.canvasGpuDevice() ?? null
+  }
+  createCanvasTexture(descriptor: GPUTextureDescriptor): { texture: GPUTexture; handle: number } {
+    return this.#wasm.createCanvasTexture(JSON.stringify(descriptor))
+  }
+  releaseCanvasTexture(handle: number): void {
+    this.#wasm.releaseCanvasTexture(handle)
+  }
+  resetCanvasSource(id: number): void {
+    this.#wasm.resetCanvasSource(id)
+  }
+  presentCanvasTexture(
+    id: number,
+    device: unknown,
+    handle: number,
+    opaque: boolean,
+  ): Promise<boolean> {
+    if (device !== this.canvasGpuDevice())
+      return Promise.reject(new Error("Canvas device does not match this window's device"))
+    return this.#wasm.presentCanvasTexture(id, handle, opaque)
+  }
   createCanvasSource(): number {
     return this.#wasm.createCanvasSource()
   }

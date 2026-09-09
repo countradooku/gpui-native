@@ -6,6 +6,7 @@ import { handleGpuiEvent } from "./events.js"
 import type { NativeEventCallback, NativeRenderer } from "./native.js"
 import { reportRuntimeError } from "./runtime-errors.js"
 import type { EventPayload } from "./types.js"
+import { wrapDevice } from "./wgpu-native-objects.js"
 
 interface NativeModule {
   GpuiRenderer: new (callback?: NativeEventCallback) => NativeGpuiRenderer
@@ -20,6 +21,26 @@ function adaptNativeRenderer(native: NativeGpuiRenderer): NativeRenderer {
       const cached = methods.get(property)
       if (cached !== undefined) return cached
 
+      if (property === "canvasGpuDevice") {
+        let shared: GPUDevice | undefined
+        const acquire = () => {
+          if (shared) return shared
+          const native = target.canvasGpuDevice()
+          if (!native) return null
+          shared = wrapDevice(native, {
+            vendor: "",
+            architecture: "",
+            device: "",
+            description: "GPUI shared device",
+          } as GPUAdapterInfo)
+          void shared.lost.then(() => {
+            shared = undefined
+          })
+          return shared
+        }
+        methods.set(property, acquire)
+        return acquire
+      }
       if (property === "setStyle") {
         const setStyle: NativeRenderer["setStyle"] = (id, style) => {
           target.setStyle(id, typeof style === "string" ? style : JSON.stringify(style))

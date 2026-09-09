@@ -199,8 +199,7 @@ jobs:
       - name: Load and exercise native binding
         run: bun run test:native
 
-      - name: Setup Node for Dawn WebGPU
-        if: contains(matrix.settings.target, 'linux')
+      - name: Setup Node for wgpu regression tests
         uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -209,9 +208,14 @@ jobs:
         if: contains(matrix.settings.target, 'linux')
         run: sudo apt-get install -y mesa-vulkan-drivers
 
-      - name: Exercise WebGPU compute and canvas transport
+      # Hosted Linux uses Mesa software Vulkan. This exercises the binding and
+      # explicit readback transport, not physical GPU/display interoperability.
+      - name: Exercise WebGPU compute and explicit readback
         if: contains(matrix.settings.target, 'linux')
         run: bun run test:webgpu
+
+      - name: Regress async pipelines and resource lifecycle in Node and Bun
+        run: bun run test:wgpu
 
   release:
     name: GitHub release

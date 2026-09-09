@@ -1,62 +1,83 @@
 import { GpuiCanvas, useGPUCanvas } from "@gpui-native/react"
 import { useEffect, useState } from "react"
 
+import { startThreeScene } from "../../shared/three-scene.js"
 import { startWebGPUScene } from "../../shared/webgpu-scene.js"
 
-export default function App({ gpu }: { gpu: GPU }) {
-  const canvas = useGPUCanvas({ width: 640, height: 400 })
+function Canvases({ gpu, width }: { gpu: GPU; width: number }) {
+  const compute = useGPUCanvas({ width, height: 300 })
+  const three = useGPUCanvas({ width, height: 300 })
   const [error, setError] = useState("")
   useEffect(() => {
-    if (!canvas) return
+    if (!compute || !three) return
     let cancelled = false
-    let stop: (() => void) | undefined
-    void startWebGPUScene(canvas, gpu, (error) => setError(String(error)))
-      .then((dispose) => {
-        if (cancelled) dispose()
-        else stop = dispose
-      })
-      .catch((error) => {
-        if (!cancelled) setError(String(error))
-      })
+    const stops: (() => void)[] = []
+    for (const [canvas, start] of [
+      [compute, startWebGPUScene],
+      [three, startThreeScene],
+    ] as const) {
+      void start(canvas, gpu, (error) => setError(String(error)))
+        .then((stop) => {
+          if (cancelled) stop()
+          else stops.push(stop)
+        })
+        .catch((error) => {
+          if (!cancelled) setError(String(error))
+        })
+    }
     return () => {
       cancelled = true
-      stop?.()
+      for (const stop of stops) stop()
     }
-  }, [canvas, gpu])
+  }, [compute, three, gpu])
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <text>Compute + WGSL · 4× MSAA</text>
+      {compute && (
+        <GpuiCanvas source={compute.id} testId="webgpu-canvas" style={{ width, height: 300 }} />
+      )}
+      <text>Textured Three.js · depth + 4× MSAA</text>
+      {three && (
+        <GpuiCanvas source={three.id} testId="three-canvas" style={{ width, height: 300 }} />
+      )}
+      {error && <text style={{ color: "#ff8888" }}>{error}</text>}
+    </div>
+  )
+}
+export default function App({ gpu }: { gpu: GPU }) {
+  const [visible, setVisible] = useState(true)
+  const [wide, setWide] = useState(false)
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
         padding: 24,
-        gap: 16,
+        gap: 12,
+        display: "flex",
         flexDirection: "column",
         backgroundColor: "#070b17",
         color: "#e8efff",
       }}
     >
-      <text style={{ fontSize: 26 }}>React · WebGPU canvas</text>
-      <text>WGSL shaders · 4× antialiasing · bounded asynchronous presentation</text>
-      {canvas && (
-        <GpuiCanvas
-          source={canvas.id}
-          testId="webgpu-canvas"
-          style={{ width: 640, height: 400 }}
-          commands={[
-            {
-              type: "rect",
-              x: 12,
-              y: 12,
-              width: 616,
-              height: 376,
-              radius: 12,
-              stroke: "#6686b0",
-              strokeWidth: 1,
-            },
-          ]}
-        />
-      )}
-      {error && <text style={{ color: "#ff8888" }}>{error}</text>}
+      <text style={{ fontSize: 26 }}>React · shared GPU canvases</text>
+      <div style={{ display: "flex", flexDirection: "row", gap: 12 }}>
+        <div
+          role="button"
+          style={{ padding: 10, backgroundColor: "#23304a", borderRadius: 6 }}
+          onClick={() => setVisible(!visible)}
+        >
+          {visible ? "Unmount canvases" : "Mount canvases"}
+        </div>
+        <div
+          role="button"
+          style={{ padding: 10, backgroundColor: "#23304a", borderRadius: 6 }}
+          onClick={() => setWide(!wide)}
+        >
+          Resize canvases
+        </div>
+      </div>
+      {visible && <Canvases gpu={gpu} width={wide ? 720 : 480} />}
     </div>
   )
 }
