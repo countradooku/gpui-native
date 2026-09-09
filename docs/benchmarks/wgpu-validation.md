@@ -36,3 +36,14 @@ CI now distinguishes hosted software Vulkan tests from the opt-in
 `gpu-hardware.yml` workflow, which requires a self-hosted runner labelled `gpu`
 and a logged-in display session. A green software run is not hardware validation.
 See [the support matrix and reproducible hardware steps](../webgpu.md).
+
+## Production-window repaint regression
+
+A user-run native example exposed a missing test boundary: asynchronous Metal
+publication attempted to access AppKit's main-thread window state from a worker.
+The test renderer and headless benchmarks did not exercise that path. macOS
+publication now marks an atomic dirty flag; the existing main-thread host tick
+performs the repaint. `native-webgpu-window.mts`, included in `test:wgpu`, runs a
+real AppKit window in Bun and Node, asserts sustained presentation and actual
+compute/Three.js screenshot pixels, and checks resizing. Both runtimes pass
+locally. The React application was also relaunched and its output captured.

@@ -1,3 +1,6 @@
+// N-API async Send/Sync proofs traverse wgpu's nested native resource graph.
+#![recursion_limit = "256"]
+
 // Keep the complete workspace lint policy active for the native engine.
 
 mod accessibility;

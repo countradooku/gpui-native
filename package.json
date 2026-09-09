@@ -43,7 +43,7 @@
     "build:adapters": "bun --filter @gpui-native/runtime build && bun --filter @gpui-native/vue build && bun --filter @gpui-native/react build",
     "test:webgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:webgpu",
     "bench:webgpu": "bun --filter @gpui-native/runtime bench:webgpu",
-    "test:wgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:wgpu && bun packages/runtime/test/native-wgpu-lifecycle.mts",
+    "test:wgpu": "bun run build:adapters && bun --filter @gpui-native/runtime test:wgpu && bun packages/runtime/test/native-wgpu-lifecycle.mts && bun packages/runtime/test/native-webgpu-window.mts",
     "bench:wgpu": "bun --filter @gpui-native/runtime bench:wgpu"
   },
   "devDependencies": {

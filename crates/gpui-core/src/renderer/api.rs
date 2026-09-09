@@ -19,6 +19,9 @@ pub struct GpuiRenderer {
     pub(super) tree: Arc<Mutex<RetainedTree>>,
     pub(super) initialized: Arc<Mutex<bool>>,
     pub(super) headless: Mutex<bool>,
+    /// Worker completions only mark dirty; `AppKit` is touched by the host tick.
+    #[cfg(target_os = "macos")]
+    pending_gpu_repaint: std::sync::atomic::AtomicBool,
     pub(super) window_size: Mutex<WindowSize>,
     /// Shared with the view so timeline controls avoid a UI-thread round trip.
     clock: crate::automation::AutomationClock,
@@ -51,6 +54,8 @@ impl GpuiRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             headless: Mutex::new(false),
+            #[cfg(target_os = "macos")]
+            pending_gpu_repaint: std::sync::atomic::AtomicBool::new(false),
             window_size: Mutex::new(WindowSize {
                 width: 800.0,
                 height: 600.0,
@@ -128,6 +133,10 @@ impl GpuiRenderer {
             .await
             .map_err(Error::from_reason)?;
         if presented && *self.initialized.lock() {
+            #[cfg(target_os = "macos")]
+            self.pending_gpu_repaint
+                .store(true, std::sync::atomic::Ordering::Release);
+            #[cfg(not(target_os = "macos"))]
             self.request_invalidate()?;
         }
         Ok(presented)
@@ -673,6 +682,12 @@ impl GpuiRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            if self
+                .pending_gpu_repaint
+                .swap(false, std::sync::atomic::Ordering::AcqRel)
+            {
+                self.request_invalidate()?;
+            }
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
