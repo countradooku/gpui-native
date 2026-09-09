@@ -135,30 +135,28 @@ impl CanvasFrames {
     /// Evict obsolete atlas entries on the window thread, including unmounts.
     pub fn prepare_frame(&mut self, window: &mut gpui::Window) {
         #[cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm"))]
-        if window.gpu_device_lost() != Some(true) {
-            if let Some(context) = window
-                .gpu_context()
-                .and_then(|v| v.downcast::<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>().ok())
-            {
-                let (device, queue) = *context;
-                if self.shared_gpu.as_ref().is_none_or(|engine| {
-                    engine.alive().is_err() || !Arc::ptr_eq(&engine.device, &device)
-                }) {
-                    for source in self.direct.values() {
-                        source.reset(false);
-                    }
-                    if let Some(old) = self.shared_gpu.take() {
-                        old.destroy();
-                    }
-                    self.shared_gpu = Some(crate::gpu::GpuEngine::new(device, queue, false));
-                }
-            }
-        } else {
+        if window.gpu_device_lost() == Some(true) {
             for source in self.direct.values() {
                 source.reset(false);
             }
             if let Some(old) = self.shared_gpu.take() {
                 old.destroy();
+            }
+        } else if let Some(context) = window
+            .gpu_context()
+            .and_then(|v| v.downcast::<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>().ok())
+        {
+            let (device, queue) = *context;
+            if self.shared_gpu.as_ref().is_none_or(|engine| {
+                engine.alive().is_err() || !Arc::ptr_eq(&engine.device, &device)
+            }) {
+                for source in self.direct.values() {
+                    source.reset(false);
+                }
+                if let Some(old) = self.shared_gpu.take() {
+                    old.destroy();
+                }
+                self.shared_gpu = Some(crate::gpu::GpuEngine::new(device, queue, false));
             }
         }
 

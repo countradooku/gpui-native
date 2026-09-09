@@ -221,8 +221,8 @@ impl CustomElement for CanvasElement {
                         bounds,
                         frame.paint.clone(),
                         gpui::size(
-                            gpui::DevicePixels(frame.texture.width() as i32),
-                            gpui::DevicePixels(frame.texture.height() as i32),
+                            gpui::DevicePixels(frame.texture.width().cast_signed()),
+                            gpui::DevicePixels(frame.texture.height().cast_signed()),
                         ),
                         frame.opaque,
                         Some(frame.clone()),
