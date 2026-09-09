@@ -1,0 +1,21 @@
+{
+  "name": "@gpui-react/example-webgpu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && vite build --config ../../vite.react-examples.config.mts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@gpui-native/react": "workspace:^",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "^19.2.0",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

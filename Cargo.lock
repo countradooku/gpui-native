@@ -2363,6 +2363,7 @@ dependencies = [
  "gpui",
  "gpui_macos",
  "gpui_platform",
+ "image",
  "js-sys",
  "log",
  "napi",

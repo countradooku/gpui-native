@@ -274,6 +274,7 @@ impl StyleTable {
 }
 
 pub struct RetainedTree {
+    pub(crate) canvas_frames: Arc<parking_lot::Mutex<crate::gpu_canvas::CanvasFrames>>,
     pub elements: ElementMap,
     pub styles: StyleTable,
     /// The root element ID set by appendChildToContainer.
@@ -290,6 +291,7 @@ impl Default for RetainedTree {
 impl RetainedTree {
     pub fn new() -> Self {
         Self {
+            canvas_frames: Arc::default(),
             elements: ElementMap::default(),
             styles: StyleTable::default(),
             root_id: None,
@@ -337,6 +339,7 @@ impl RetainedTree {
     /// `Arc::make_mut` on only the records they touch.
     pub(crate) fn render_snapshot(&self) -> Self {
         Self {
+            canvas_frames: self.canvas_frames.clone(),
             elements: self.elements.clone(),
             // The renderer reads styles through each element's Arc. The
             // interning table is mutation-only and must not be duplicated.

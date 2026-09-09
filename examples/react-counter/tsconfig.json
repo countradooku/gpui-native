@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "jsxImportSource": "@gpui-native/react"
+  },
+  "include": ["src/**/*.tsx", "src/**/*.ts"]
+}

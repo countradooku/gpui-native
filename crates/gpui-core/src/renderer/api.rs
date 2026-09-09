@@ -65,6 +65,74 @@ impl GpuiRenderer {
         }
     }
 
+    /// Allocate a renderer-owned source for the canvas `source` prop.
+    #[cfg_attr(not(target_family = "wasm"), napi)]
+    pub fn create_canvas_source(&self) -> Result<u32> {
+        self.tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .create()
+            .map_err(Error::from_reason)
+    }
+
+    /// Publish padded RGBA8 or BGRA8 pixels through the binary bridge.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "flat binary frame signature shared by N-API and Wasm avoids JSON metadata in the presentation path"
+    )]
+    pub fn present_canvas_frame(
+        &self,
+        id: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: Uint8Array,
+        bgra: bool,
+        opaque: bool,
+    ) -> Result<()> {
+        self.present_canvas_slice(id, width, height, stride, pixels.as_ref(), bgra, opaque)
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "flat binary frame signature shared by N-API and Wasm avoids JSON metadata in the presentation path"
+    )]
+    pub(super) fn present_canvas_slice(
+        &self,
+        id: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: &[u8],
+        bgra: bool,
+        opaque: bool,
+    ) -> Result<()> {
+        let image = crate::gpu_canvas::decode_frame(width, height, stride, pixels, bgra, opaque)
+            .map_err(Error::from_reason)?;
+        let frames = self.tree.lock().canvas_frames.clone();
+        frames
+            .lock()
+            .publish_image(id, image)
+            .map_err(Error::from_reason)?;
+        if *self.initialized.lock() {
+            self.request_invalidate()?;
+        }
+        Ok(())
+    }
+
+    /// Release a source. Repeated destruction is harmless.
+    #[cfg_attr(not(target_family = "wasm"), napi)]
+    pub fn destroy_canvas_source(&self, id: u32) -> Result<()> {
+        self.tree.lock().canvas_frames.lock().destroy(id);
+        if *self.initialized.lock() {
+            self.request_invalidate()?;
+        }
+        Ok(())
+    }
+
     /// Initialize GPUI using the native event-loop architecture for this OS.
     #[cfg_attr(not(target_family = "wasm"), napi)]
     pub fn init(&self, options: Option<WindowOptions>) -> Result<()> {
@@ -623,6 +691,7 @@ impl GpuiRenderer {
     /// process alive.
     #[cfg_attr(not(target_family = "wasm"), napi)]
     pub fn close(&self) -> Result<()> {
+        self.tree.lock().canvas_frames.lock().clear();
         if !*self.initialized.lock() {
             return Ok(());
         }

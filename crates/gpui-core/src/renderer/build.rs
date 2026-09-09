@@ -94,6 +94,7 @@ pub(crate) fn build_element(
                 .collect();
             let inherited = ctx.inherited.clone();
             let render_ctx = CustomRenderContext {
+                canvas_frames: ctx.tree.canvas_frames.clone(),
                 id,
                 events: &element.events,
                 event_callback: ctx.event_callback,

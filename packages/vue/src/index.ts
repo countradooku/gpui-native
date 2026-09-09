@@ -243,3 +243,5 @@ export type {
   WindowOptions,
   WindowSize,
 } from "./types.js"
+
+export * from "./webgpu.js"

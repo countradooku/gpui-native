@@ -4,7 +4,7 @@
 [![GitHub Pages](https://github.com/countradooku/gpui-native/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-native/)
 [![npm](https://img.shields.io/npm/v/@gpui-native/vue)](https://www.npmjs.com/package/@gpui-native/vue)
 
-A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3 is the first supported framework adapter; React, Svelte, and other adapters are planned.
+A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3 and React 19.2 have dedicated adapters with native and browser support.
 
 ## Status
 
@@ -27,7 +27,7 @@ The published npm packages live under the `@gpui-native` org:
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
 for this runtime going forward: bindings for other frameworks and platforms
-(React, Svelte, Solid, and eventually mobile hosts) will be published there as they
+(Svelte, Solid, and eventually mobile hosts) will be published there as they
 land.
 
 The upstream baseline and subsequent ports are tracked in [the GPUix synchronization record](docs/upstream-sync.md).
@@ -48,8 +48,10 @@ The engine and framework adapters have separate ownership:
 - `packages/vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `@gpui-native/vue` (alias: `gpui-vue`).
 - `packages/core` — framework-neutral N-API addon loader, generated ABI types, and prebuilt platform binaries. Published as `@gpui-native/core`.
 
-Future adapters belong in `packages/react`, `packages/svelte`, and similar directories.
-They consume the core directly rather than depending on `packages/vue`. See
+- `packages/react` — React reconciliation, typed JSX, hooks, headless controls, and testing APIs. See [React support and examples](docs/react.md).
+- `packages/runtime` — shared TypeScript backend wrappers, native props, batching, events, automation, and GPU testing.
+
+Future adapters consume the shared runtime rather than depending on another framework. See
 [the adapter architecture](docs/architecture.md) for the boundary and extension path.
 
 ```text
@@ -60,6 +62,17 @@ NodeOps + patchProp
 Rust RetainedTree + native element registry
     ↓ GPUI layout, input, text, paint, and events
 Native GPUI window
+```
+
+## React quick start
+
+See [the React guide](docs/react.md) for JSX configuration, native and browser setup,
+component parity, testing, and three runnable examples. In a checkout:
+
+```bash
+bun run build:adapters
+bun --filter @gpui-react/example-counter build
+bun --filter @gpui-react/example-counter start
 ```
 
 ## Quick start
@@ -365,3 +378,10 @@ The native engine pins the Zed/GPUI revision whose embedded-window, selectable-t
 ## Attribution
 
 The full native component engine is adapted from GPUix's Apache-2.0 native package. Some upstream native subsystems derive from MIT-licensed Comet. Source details and license texts are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md), [`LICENSES/Apache-2.0.txt`](./LICENSES/Apache-2.0.txt), and [`LICENSES/Comet-MIT.txt`](./LICENSES/Comet-MIT.txt). The Vue renderer, component API, state model, composables, automation client/protocol implementation, and examples are gpui-vue code.
+
+### WebGPU canvas
+
+React and Vue can display real WebGPU rendering through a shared canvas source, with
+WGSL, compute, texture uploads, cube maps, MSAA, and Three.js coverage. See the
+[WebGPU guide](docs/webgpu.md) for runnable examples, lifecycle rules, measured
+readback costs, and current Node/browser requirements.

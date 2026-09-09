@@ -17,6 +17,8 @@ async function run(command: string[], environment?: Record<string, string>): Pro
   if (exitCode !== 0) throw new Error(`${command.join(" ")} exited with code ${exitCode}`)
 }
 
+await run([process.execPath, "run", "build:adapters"])
+
 await rm(bindingsOutput, { recursive: true, force: true })
 await mkdir(bindingsOutput, { recursive: true })
 

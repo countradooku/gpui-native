@@ -1,7 +1,7 @@
 # Framework adapter architecture
 
-GPUI Native is the shared engine. Vue is its first framework adapter. React,
-Svelte, and other adapters are planned; they are not implemented yet.
+GPUI Native is the shared engine. Vue 3 and React 19.2 have independent adapters.
+Svelte and other adapters can use the same framework-neutral TypeScript runtime.
 
 ## Ownership
 
@@ -10,7 +10,9 @@ Svelte, and other adapters are planned; they are not implemented yet.
 | `crates/gpui-core`                    | Retained tree, batch validation, layout, rendering, native components, text, input, focus, scrolling, windows, and native/Wasm bindings |
 | `packages/core` (`@gpui-native/core`) | Native addon loading, generated ABI types, and platform binaries; no framework runtime dependency                                       |
 | `packages/vue` (`@gpui-native/vue`)   | Vue reconciliation, components, refs, composables, and Vue-facing renderer helpers                                                      |
-| `examples`                            | Current Vue examples                                                                                                                    |
+| `packages/runtime`                    | Shared backend wrappers, props, batching, events, automation and GPU test renderer                                                      |
+| `packages/react`                      | React reconciliation, JSX, hooks, components and testing                                                                                |
+| `examples`                            | Vue and React examples                                                                                                                  |
 | `web`                                 | Browser example gallery and generated Wasm bridge                                                                                       |
 
 The dependency direction is framework adapter → core → GPUI. The core must
@@ -33,13 +35,13 @@ Wasm artifact is `gpui_core.wasm`; generated browser bindings use the
 `gpui_core` name. Browser hosting remains single-threaded and must not require
 COOP/COEP headers.
 
-The current TypeScript browser wrapper, convenience types, batching helpers,
-and automation helpers still live in `packages/vue`. Some include Vue types or
-lifecycle assumptions. They are not a shared JavaScript runtime yet. When a
-second adapter needs these helpers, extract the framework-independent contract
-and implementation into a shared package, keeping Vue refs, VNodes, lifecycle
-hooks, and reconciliation in the Vue adapter. Do not make React or Svelte
-import Vue to reuse an engine capability.
+`packages/runtime` contains the framework-neutral TypeScript contract, backend
+wrappers, batching, events, automation, text matching and GPU test renderer.
+Vue re-exports moved APIs for compatibility; its VNodes, refs and composables
+remain in `packages/vue`. React owns its reconciler and hooks in `packages/react`.
+Both adapters claim exclusive ownership of a native renderer and share its ID
+allocator. React materializes only committed trees, so speculative work cannot
+leak native elements or event handlers.
 
 ## Adding an adapter
 

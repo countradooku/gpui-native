@@ -26,6 +26,7 @@ pub mod markdown;
 /// Context passed to `CustomElement::render()` with everything needed
 /// to build GPUI elements with events and focus.
 pub struct CustomRenderContext<'a> {
+    pub canvas_frames: std::sync::Arc<parking_lot::Mutex<crate::gpu_canvas::CanvasFrames>>,
     /// Numeric element ID (matches Vue's instance ID).
     pub id: u64,
     /// Event types registered by Vue (e.g. "keyDown", "click").

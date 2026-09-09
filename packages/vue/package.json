@@ -50,6 +50,14 @@
     "./tooltip": {
       "types": "./dist/tooltip.d.ts",
       "import": "./dist/tooltip.js"
+    },
+    "./webgpu": {
+      "types": "./dist/webgpu.d.ts",
+      "import": "./dist/webgpu.js"
+    },
+    "./webgpu-native": {
+      "types": "./dist/webgpu-native.d.ts",
+      "import": "./dist/webgpu-native.js"
     }
   },
   "scripts": {
@@ -59,6 +67,7 @@
   },
   "dependencies": {
     "@gpui-native/core": "workspace:^",
+    "@gpui-native/runtime": "workspace:^",
     "@vue/runtime-core": "^3.5.41",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"

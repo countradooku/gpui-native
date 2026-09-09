@@ -1,0 +1,9 @@
+{
+  "name": "@gpui-examples/webgpu-scene",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@gpui-native/runtime": "workspace:^",
+    "@webgpu/types": "^0.1.72"
+  }
+}

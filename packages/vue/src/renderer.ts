@@ -1,3 +1,4 @@
+import { allocateRendererId, claimRenderer } from "@gpui-native/runtime/ownership"
 import {
   createRenderer,
   type App,
@@ -12,22 +13,7 @@ import { GpuiRendererKey } from "./context.js"
 import { MemoryNativeRenderer, type NativeRenderer } from "./native.js"
 import { createNodeOps, createPatchProp } from "./nodeOps.js"
 import { createGpuiRoot, type GpuiContainer, type GpuiNode } from "./nodes.js"
-
-const rendererStateKey = Symbol.for("gpui-native.vue.renderers")
-const rendererState = (Reflect.get(globalThis, rendererStateKey) as
-  | {
-      owners: WeakMap<NativeRenderer, symbol>
-      ids: WeakMap<NativeRenderer, number>
-    }
-  | undefined) ?? { owners: new WeakMap(), ids: new WeakMap() }
-Reflect.set(globalThis, rendererStateKey, rendererState)
-const rendererOwners = rendererState.owners
-
-export function allocateRendererId(renderer: NativeRenderer): number {
-  const id = (rendererState.ids.get(renderer) ?? 0) + 1
-  rendererState.ids.set(renderer, id)
-  return id
-}
+export { allocateRendererId } from "@gpui-native/runtime/ownership"
 
 export interface GpuiRendererHost {
   /** The caller-provided first-party Rust renderer (or memory renderer in tests). */
@@ -47,11 +33,7 @@ export interface GpuiRendererHost {
 export function createGpuiRenderer(
   nativeRenderer: NativeRenderer = new MemoryNativeRenderer(),
 ): GpuiRendererHost {
-  if (rendererOwners.has(nativeRenderer)) {
-    throw new Error("A native GPUI renderer can only own one live Vue root")
-  }
-  const owner = Symbol("gpui-vue-root")
-  rendererOwners.set(nativeRenderer, owner)
+  const release = claimRenderer(nativeRenderer, "Vue root")
 
   try {
     const renderer = wrapWithBatching(nativeRenderer)
@@ -104,14 +86,12 @@ export function createGpuiRenderer(
           cleaned = true
           destroyed = true
         } finally {
-          if (cleaned && rendererOwners.get(nativeRenderer) === owner) {
-            rendererOwners.delete(nativeRenderer)
-          }
+          if (cleaned) release()
         }
       },
     }
   } catch (error) {
-    if (rendererOwners.get(nativeRenderer) === owner) rendererOwners.delete(nativeRenderer)
+    release()
     throw error
   }
 }

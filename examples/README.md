@@ -49,3 +49,9 @@ matching native-addon build for each operating system and architecture.
 The audio example demonstrates the high-throughput decoded-frame bridge and
 its low-latency overflow behavior. Actual device playback remains the
 responsibility of the embedding native audio backend.
+
+## React examples
+
+See [the React guide](../docs/react.md). `react-counter`, `react-showcase`, and
+`react-multiple-windows` each support `build`, `start`, and `build:binary`.
+They also run in the Pages gallery with the shared GPUI Web backend.

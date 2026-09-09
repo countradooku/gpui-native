@@ -1770,6 +1770,26 @@ impl gpui::Render for GpuiView {
         let callback = self.event_callback.clone();
         let tree_revision = tree.revision();
         let tree_changed = tree_revision != self.last_tree_revision;
+        {
+            let mut frames = tree.canvas_frames.lock();
+            if tree_changed {
+                frames.active = tree
+                    .elements
+                    .values()
+                    .filter_map(|element| {
+                        if element.element_type != "canvas" {
+                            return None;
+                        }
+                        element
+                            .custom_props
+                            .get("source")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|id| u32::try_from(id).ok())
+                    })
+                    .collect();
+            }
+            frames.prepare_frame(window);
+        }
 
         if tree_changed {
             // All of these are O(tree) maintenance passes. Motion frames reuse

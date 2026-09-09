@@ -3,6 +3,12 @@
 /** The main GPUI renderer exposed to Node.js. */
 export declare class GpuiRenderer {
   constructor(eventCallback?: (error: Error | null, event: EventPayload | null) => void)
+  /** Allocate a renderer-owned source for the canvas `source` prop. */
+  createCanvasSource(): number
+  /** Publish padded RGBA8 or BGRA8 pixels through the binary bridge. */
+  presentCanvasFrame(id: number, width: number, height: number, stride: number, pixels: Uint8Array, bgra: boolean, opaque: boolean): void
+  /** Release a source. Repeated destruction is harmless. */
+  destroyCanvasSource(id: number): void
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
   createElement(id: number, elementType: string): void
@@ -204,6 +210,9 @@ export declare class TestGpuiRenderer {
   setCustomProp(id: number, key: string, valueJson: string): void
   /** Get a custom prop value from an element. */
   getCustomProp(id: number, key: string): string | null
+  createCanvasSource(): number
+  presentCanvasFrame(id: number, width: number, height: number, stride: number, pixels: Uint8Array, bgra: boolean, opaque: boolean): void
+  destroyCanvasSource(id: number): void
   /**
    * Signal that a batch of mutations is complete.
    * In tests, this is a no-op — `flush()` handles the actual re-render.
