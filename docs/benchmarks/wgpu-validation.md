@@ -47,3 +47,8 @@ performs the repaint. `native-webgpu-window.mts`, included in `test:wgpu`, runs 
 real AppKit window in Bun and Node, asserts sustained presentation and actual
 compute/Three.js screenshot pixels, and checks resizing. Both runtimes pass
 locally. The React application was also relaunched and its output captured.
+
+The native Vue WebGPU example was also built, launched with Bun and visually
+verified with both scenes present. Its Vite native build now externalizes all
+`@gpui-native/*` entry points, including `/webgpu-native`; previously the subpath
+was bundled with a browser stub for `node:module`, causing startup to fail.
