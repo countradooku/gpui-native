@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-09T10:28:48.978Z",
+  "timestamp": "2026-09-09T10:35:05.358Z",
   "backend": "wgpu",
   "host": {
     "platform": "darwin",
@@ -24,377 +24,377 @@
       "width": 640,
       "height": 400,
       "canvases": 1,
-      "measuredFrames": 2035,
-      "measuredSeconds": 3.0001195000000003,
+      "measuredFrames": 2163,
+      "measuredSeconds": 3.0002380840000002,
       "ms": {
         "sceneEncoding": {
-          "p50": 0.033,
-          "p95": 0.113,
-          "p99": 0.381
-        },
-        "submission": {
-          "p50": 0.011,
-          "p95": 0.03,
-          "p99": 0.051
-        },
-        "synchronizationAndTransport": {
-          "p50": 1.523,
-          "p95": 2.186,
-          "p99": 2.599
-        },
-        "total": {
-          "p50": 1.574,
-          "p95": 2.248,
-          "p99": 2.687
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 1708295,
-        "system": 1146867
-      },
-      "peakRssBytes": 112033792,
-      "cpuPixelBytes": 2114560000,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "async-readback",
-      "width": 640,
-      "height": 400,
-      "canvases": 4,
-      "measuredFrames": 1181,
-      "measuredSeconds": 3.0005020410000003,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.082,
-          "p95": 0.106,
-          "p99": 0.126
-        },
-        "submission": {
-          "p50": 0.021,
-          "p95": 0.027,
-          "p99": 0.035
-        },
-        "synchronizationAndTransport": {
-          "p50": 2.399,
-          "p95": 3.097,
-          "p99": 3.498
-        },
-        "total": {
-          "p50": 2.499,
-          "p95": 3.206,
-          "p99": 3.592
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 3308472,
-        "system": 2158953
-      },
-      "peakRssBytes": 122961920,
-      "cpuPixelBytes": 4960256000,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "async-readback",
-      "width": 1920,
-      "height": 1080,
-      "canvases": 1,
-      "measuredFrames": 1140,
-      "measuredSeconds": 3.000056791999999,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.04,
-          "p95": 0.075,
-          "p99": 0.343
-        },
-        "submission": {
-          "p50": 0.013,
-          "p95": 0.021,
-          "p99": 0.03
-        },
-        "synchronizationAndTransport": {
-          "p50": 2.628,
-          "p95": 3.408,
-          "p99": 4.267
-        },
-        "total": {
-          "p50": 2.688,
-          "p95": 3.472,
-          "p99": 4.329
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 2400927,
-        "system": 1134864
-      },
-      "peakRssBytes": 209207296,
-      "cpuPixelBytes": 9704448000,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "async-readback",
-      "width": 1920,
-      "height": 1080,
-      "canvases": 4,
-      "measuredFrames": 514,
-      "measuredSeconds": 3.003539959,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.103,
-          "p95": 0.14,
-          "p99": 0.162
-        },
-        "submission": {
-          "p50": 0.026,
-          "p95": 0.036,
-          "p99": 0.041
-        },
-        "synchronizationAndTransport": {
-          "p50": 5.838,
-          "p95": 6.512,
-          "p99": 7.23
-        },
-        "total": {
-          "p50": 5.965,
-          "p95": 6.637,
-          "p99": 7.341
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 3554326,
-        "system": 1574380
-      },
-      "peakRssBytes": 284753920,
-      "cpuPixelBytes": 18048614400,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "async-readback",
-      "width": 3840,
-      "height": 2160,
-      "canvases": 1,
-      "measuredFrames": 583,
-      "measuredSeconds": 3.0027379169999984,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.052,
-          "p95": 0.092,
-          "p99": 0.161
-        },
-        "submission": {
-          "p50": 0.015,
-          "p95": 0.024,
-          "p99": 0.034
-        },
-        "synchronizationAndTransport": {
-          "p50": 5.039,
-          "p95": 6.326,
-          "p99": 6.784
-        },
-        "total": {
-          "p50": 5.124,
-          "p95": 6.393,
-          "p99": 6.837
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 2396146,
-        "system": 581541
-      },
-      "peakRssBytes": 542015488,
-      "cpuPixelBytes": 20337868800,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "async-readback",
-      "width": 3840,
-      "height": 2160,
-      "canvases": 4,
-      "measuredFrames": 196,
-      "measuredSeconds": 3.005859792000001,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.124,
-          "p95": 0.154,
-          "p99": 0.166
-        },
-        "submission": {
           "p50": 0.031,
-          "p95": 0.038,
-          "p99": 0.045
-        },
-        "synchronizationAndTransport": {
-          "p50": 14.905,
-          "p95": 17.204,
-          "p99": 19.079
-        },
-        "total": {
-          "p50": 15.06,
-          "p95": 17.344,
-          "p99": 19.22
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 3412035,
-        "system": 796246
-      },
-      "peakRssBytes": 873988096,
-      "cpuPixelBytes": 29992550400,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "direct",
-      "width": 640,
-      "height": 400,
-      "canvases": 1,
-      "measuredFrames": 2338,
-      "measuredSeconds": 3.0011668339999997,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.059,
-          "p95": 0.133,
-          "p99": 0.218
+          "p95": 0.087,
+          "p99": 0.298
         },
         "submission": {
-          "p50": 0.02,
-          "p95": 0.04,
-          "p99": 0.071
+          "p50": 0.01,
+          "p95": 0.027,
+          "p99": 0.037
         },
         "synchronizationAndTransport": {
-          "p50": 1.184,
-          "p95": 1.255,
-          "p99": 2.258
+          "p50": 1.481,
+          "p95": 2,
+          "p99": 2.174
         },
         "total": {
-          "p50": 1.264,
-          "p95": 1.314,
-          "p99": 2.424
+          "p50": 1.521,
+          "p95": 2.061,
+          "p99": 2.253
         }
       },
       "cpuIncludingWarmup": {
-        "user": 504376,
-        "system": 543686
+        "user": 1574417,
+        "system": 1051001
       },
-      "peakRssBytes": 874053632,
-      "cpuPixelBytes": 0,
+      "peakRssBytes": 116539392,
+      "cpuPixelBytes": 2245632000,
       "gpuSceneTime": null,
       "compositionTime": null
     },
     {
-      "presentation": "direct",
+      "presentation": "async-readback",
       "width": 640,
       "height": 400,
       "canvases": 4,
-      "measuredFrames": 2074,
-      "measuredSeconds": 3.0006426250000002,
+      "measuredFrames": 1133,
+      "measuredSeconds": 3.000126375,
       "ms": {
         "sceneEncoding": {
-          "p50": 0.127,
-          "p95": 0.299,
-          "p99": 0.436
-        },
-        "submission": {
-          "p50": 0.03,
-          "p95": 0.08,
-          "p99": 0.126
-        },
-        "synchronizationAndTransport": {
-          "p50": 1.125,
-          "p95": 2.38,
-          "p99": 2.514
-        },
-        "total": {
-          "p50": 1.273,
-          "p95": 2.564,
-          "p99": 2.772
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 1126379,
-        "system": 1143217
-      },
-      "peakRssBytes": 743915520,
-      "cpuPixelBytes": 0,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "direct",
-      "width": 1920,
-      "height": 1080,
-      "canvases": 1,
-      "measuredFrames": 2224,
-      "measuredSeconds": 3.0008505420000002,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.066,
-          "p95": 0.144,
-          "p99": 0.238
-        },
-        "submission": {
-          "p50": 0.021,
-          "p95": 0.04,
-          "p99": 0.07
-        },
-        "synchronizationAndTransport": {
-          "p50": 1.18,
-          "p95": 2.414,
-          "p99": 2.505
-        },
-        "total": {
-          "p50": 1.263,
-          "p95": 2.52,
-          "p99": 2.579
-        }
-      },
-      "cpuIncludingWarmup": {
-        "user": 484960,
-        "system": 484317
-      },
-      "peakRssBytes": 744095744,
-      "cpuPixelBytes": 0,
-      "gpuSceneTime": null,
-      "compositionTime": null
-    },
-    {
-      "presentation": "direct",
-      "width": 1920,
-      "height": 1080,
-      "canvases": 4,
-      "measuredFrames": 2054,
-      "measuredSeconds": 3.0009094170000026,
-      "ms": {
-        "sceneEncoding": {
-          "p50": 0.096,
-          "p95": 0.134,
-          "p99": 0.159
+          "p50": 0.091,
+          "p95": 0.15,
+          "p99": 0.264
         },
         "submission": {
           "p50": 0.022,
-          "p95": 0.03,
-          "p99": 0.039
+          "p95": 0.039,
+          "p99": 0.072
         },
         "synchronizationAndTransport": {
-          "p50": 1.153,
-          "p95": 2.425,
-          "p99": 2.462
+          "p50": 2.432,
+          "p95": 3.329,
+          "p99": 4.05
         },
         "total": {
-          "p50": 1.267,
-          "p95": 2.546,
-          "p99": 2.57
+          "p50": 2.532,
+          "p95": 3.518,
+          "p99": 4.339
         }
       },
       "cpuIncludingWarmup": {
-        "user": 837543,
-        "system": 1100106
+        "user": 3030365,
+        "system": 2025546
       },
-      "peakRssBytes": 744931328,
+      "peakRssBytes": 143507456,
+      "cpuPixelBytes": 4763648000,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "async-readback",
+      "width": 1920,
+      "height": 1080,
+      "canvases": 1,
+      "measuredFrames": 1210,
+      "measuredSeconds": 3.0010528750000005,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.044,
+          "p95": 0.087,
+          "p99": 0.195
+        },
+        "submission": {
+          "p50": 0.013,
+          "p95": 0.025,
+          "p99": 0.039
+        },
+        "synchronizationAndTransport": {
+          "p50": 2.318,
+          "p95": 2.994,
+          "p99": 3.249
+        },
+        "total": {
+          "p50": 2.398,
+          "p95": 3.07,
+          "p99": 3.313
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 2184890,
+        "system": 1091486
+      },
+      "peakRssBytes": 217137152,
+      "cpuPixelBytes": 10285056000,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "async-readback",
+      "width": 1920,
+      "height": 1080,
+      "canvases": 4,
+      "measuredFrames": 500,
+      "measuredSeconds": 3.004515042000001,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.114,
+          "p95": 0.151,
+          "p99": 0.276
+        },
+        "submission": {
+          "p50": 0.028,
+          "p95": 0.04,
+          "p99": 0.064
+        },
+        "synchronizationAndTransport": {
+          "p50": 5.953,
+          "p95": 6.549,
+          "p99": 7.465
+        },
+        "total": {
+          "p50": 6.114,
+          "p95": 6.723,
+          "p99": 7.597
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 3481075,
+        "system": 1611621
+      },
+      "peakRssBytes": 292405248,
+      "cpuPixelBytes": 17584128000,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "async-readback",
+      "width": 3840,
+      "height": 2160,
+      "canvases": 1,
+      "measuredFrames": 595,
+      "measuredSeconds": 3.000594832999999,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.058,
+          "p95": 0.091,
+          "p99": 0.158
+        },
+        "submission": {
+          "p50": 0.016,
+          "p95": 0.025,
+          "p99": 0.048
+        },
+        "synchronizationAndTransport": {
+          "p50": 4.939,
+          "p95": 5.942,
+          "p99": 6.786
+        },
+        "total": {
+          "p50": 5.018,
+          "p95": 6.016,
+          "p99": 6.86
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 2423712,
+        "system": 650467
+      },
+      "peakRssBytes": 595050496,
+      "cpuPixelBytes": 20736000000,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "async-readback",
+      "width": 3840,
+      "height": 2160,
+      "canvases": 4,
+      "measuredFrames": 192,
+      "measuredSeconds": 3.0088275839999987,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.133,
+          "p95": 0.19,
+          "p99": 0.264
+        },
+        "submission": {
+          "p50": 0.033,
+          "p95": 0.045,
+          "p99": 0.069
+        },
+        "synchronizationAndTransport": {
+          "p50": 15.297,
+          "p95": 18.053,
+          "p99": 22.448
+        },
+        "total": {
+          "p50": 15.477,
+          "p95": 18.231,
+          "p99": 22.648
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 3399660,
+        "system": 845659
+      },
+      "peakRssBytes": 926957568,
+      "cpuPixelBytes": 29461708800,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "direct",
+      "width": 640,
+      "height": 400,
+      "canvases": 1,
+      "measuredFrames": 2373,
+      "measuredSeconds": 3.0001389579999995,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.041,
+          "p95": 0.113,
+          "p99": 0.197
+        },
+        "submission": {
+          "p50": 0.013,
+          "p95": 0.035,
+          "p99": 0.062
+        },
+        "synchronizationAndTransport": {
+          "p50": 1.207,
+          "p95": 1.27,
+          "p99": 1.408
+        },
+        "total": {
+          "p50": 1.263,
+          "p95": 1.312,
+          "p99": 1.464
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 407214,
+        "system": 574638
+      },
+      "peakRssBytes": 927055872,
+      "cpuPixelBytes": 0,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "direct",
+      "width": 640,
+      "height": 400,
+      "canvases": 4,
+      "measuredFrames": 2327,
+      "measuredSeconds": 3.0003534580000015,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.087,
+          "p95": 0.188,
+          "p99": 0.319
+        },
+        "submission": {
+          "p50": 0.02,
+          "p95": 0.047,
+          "p99": 0.086
+        },
+        "synchronizationAndTransport": {
+          "p50": 1.159,
+          "p95": 1.239,
+          "p99": 2.002
+        },
+        "total": {
+          "p50": 1.268,
+          "p95": 1.336,
+          "p99": 2.303
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 876338,
+        "system": 1152659
+      },
+      "peakRssBytes": 796590080,
+      "cpuPixelBytes": 0,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "direct",
+      "width": 1920,
+      "height": 1080,
+      "canvases": 1,
+      "measuredFrames": 2377,
+      "measuredSeconds": 3.001066541,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.036,
+          "p95": 0.09,
+          "p99": 0.145
+        },
+        "submission": {
+          "p50": 0.012,
+          "p95": 0.03,
+          "p99": 0.049
+        },
+        "synchronizationAndTransport": {
+          "p50": 1.213,
+          "p95": 1.265,
+          "p99": 1.338
+        },
+        "total": {
+          "p50": 1.262,
+          "p95": 1.304,
+          "p99": 1.387
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 369928,
+        "system": 512599
+      },
+      "peakRssBytes": 796655616,
+      "cpuPixelBytes": 0,
+      "gpuSceneTime": null,
+      "compositionTime": null
+    },
+    {
+      "presentation": "direct",
+      "width": 1920,
+      "height": 1080,
+      "canvases": 4,
+      "measuredFrames": 2297,
+      "measuredSeconds": 3.0010628329999998,
+      "ms": {
+        "sceneEncoding": {
+          "p50": 0.065,
+          "p95": 0.107,
+          "p99": 0.203
+        },
+        "submission": {
+          "p50": 0.015,
+          "p95": 0.025,
+          "p99": 0.05
+        },
+        "synchronizationAndTransport": {
+          "p50": 1.186,
+          "p95": 1.294,
+          "p99": 2.456
+        },
+        "total": {
+          "p50": 1.264,
+          "p95": 1.38,
+          "p99": 2.536
+        }
+      },
+      "cpuIncludingWarmup": {
+        "user": 635192,
+        "system": 855428
+      },
+      "peakRssBytes": 796852224,
       "cpuPixelBytes": 0,
       "gpuSceneTime": null,
       "compositionTime": null
@@ -404,35 +404,35 @@
       "width": 3840,
       "height": 2160,
       "canvases": 1,
-      "measuredFrames": 2096,
-      "measuredSeconds": 3.001876457999999,
+      "measuredFrames": 2302,
+      "measuredSeconds": 3.000321667,
       "ms": {
         "sceneEncoding": {
-          "p50": 0.066,
-          "p95": 0.142,
-          "p99": 0.224
+          "p50": 0.034,
+          "p95": 0.095,
+          "p99": 0.158
         },
         "submission": {
-          "p50": 0.021,
-          "p95": 0.041,
-          "p99": 0.06
+          "p50": 0.011,
+          "p95": 0.029,
+          "p99": 0.044
         },
         "synchronizationAndTransport": {
-          "p50": 1.184,
-          "p95": 2.485,
-          "p99": 2.542
+          "p50": 1.217,
+          "p95": 1.292,
+          "p99": 2.495
         },
         "total": {
-          "p50": 1.263,
-          "p95": 2.558,
-          "p99": 2.621
+          "p50": 1.262,
+          "p95": 1.348,
+          "p99": 2.54
         }
       },
       "cpuIncludingWarmup": {
-        "user": 469235,
-        "system": 489711
+        "user": 336503,
+        "system": 502967
       },
-      "peakRssBytes": 628736000,
+      "peakRssBytes": 680640512,
       "cpuPixelBytes": 0,
       "gpuSceneTime": null,
       "compositionTime": null
@@ -442,35 +442,35 @@
       "width": 3840,
       "height": 2160,
       "canvases": 4,
-      "measuredFrames": 2290,
-      "measuredSeconds": 3.0003972920000015,
+      "measuredFrames": 2119,
+      "measuredSeconds": 3.0005658330000005,
       "ms": {
         "sceneEncoding": {
-          "p50": 0.093,
-          "p95": 0.178,
-          "p99": 0.237
+          "p50": 0.066,
+          "p95": 0.114,
+          "p99": 0.246
         },
         "submission": {
-          "p50": 0.023,
-          "p95": 0.045,
-          "p99": 0.058
+          "p50": 0.016,
+          "p95": 0.03,
+          "p99": 0.066
         },
         "synchronizationAndTransport": {
-          "p50": 1.152,
-          "p95": 1.192,
-          "p99": 2.411
+          "p50": 1.185,
+          "p95": 2.427,
+          "p99": 2.513
         },
         "total": {
-          "p50": 1.267,
-          "p95": 1.32,
-          "p99": 2.544
+          "p50": 1.264,
+          "p95": 2.531,
+          "p99": 2.625
         }
       },
       "cpuIncludingWarmup": {
-        "user": 987937,
-        "system": 1093412
+        "user": 633811,
+        "system": 865142
       },
-      "peakRssBytes": 629145600,
+      "peakRssBytes": 680968192,
       "cpuPixelBytes": 0,
       "gpuSceneTime": null,
       "compositionTime": null

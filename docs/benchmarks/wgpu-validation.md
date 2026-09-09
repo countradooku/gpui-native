@@ -19,7 +19,8 @@ Bun 1.4.0 and Node 26.8.1, with an additional Node 24.20.0 async/lifecycle run. 
 The browser check used the Codex in-app browser on localhost, with Pages served
 by Vite preview without COOP/COEP. This was visual verification, not an automated
 browser pixel/interaction suite. Native screenshot tests include transparency,
-clipping, two canvases, repeated reuse, source destruction and device replacement.
+clipping, two canvases, repeated reuse, source destruction, device replacement and zero remaining snapshot allocation
+bytes after all producer/compositor leases retire.
 Physical device removal, multiple physical adapters, Linux display composition
 and Windows hardware were not validated locally.
 
