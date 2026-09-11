@@ -1,24 +1,22 @@
 import { defineComponent, h, type PropType } from "@vue/runtime-core"
 
 import type {
+  HostProps,
   MotionKeyframe,
   MotionProps,
   MotionStyle,
   MotionTransition,
-  StyleDesc,
 } from "./types.js"
 
-export interface MotionDivProps extends MotionProps {
-  style?: StyleDesc
-}
+export interface MotionViewProps extends MotionProps, HostProps {}
 
 /**
  * A declarative motion element evaluated by Rust on GPUI animation frames.
  * Vue is only involved when props change; playback does not mutate reactive
  * style or cross N-API once per frame.
  */
-export const MotionDiv = defineComponent({
-  name: "GpuiMotionDiv",
+export const MotionView = defineComponent({
+  name: "MotionView",
   inheritAttrs: false,
   props: {
     initial: {
@@ -62,4 +60,5 @@ export function stagger(
   return { ...transition, stagger: each, staggerIndex: index }
 }
 
-export const motion = { div: MotionDiv } as const
+export const motion = { View: MotionView, div: MotionView } as const
+export { MotionView as MotionDiv, type MotionViewProps as MotionDivProps }

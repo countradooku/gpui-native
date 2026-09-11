@@ -6,8 +6,9 @@ interface ExamplePackage {
 
 const exampleRoot = process.cwd()
 const packageJson = (await Bun.file(join(exampleRoot, "package.json")).json()) as ExamplePackage
-const framework = packageJson.name.startsWith("@gpui-react/") ? "react" : "vue"
-const exampleName = packageJson.name.replace(/^@gpui-(?:vue|react)\/example-/, "")
+const framework = /^@gpui-(vue|react|svelte)\//.exec(packageJson.name)?.[1]
+if (!framework) throw new Error(`Unsupported example package: ${packageJson.name}`)
+const exampleName = packageJson.name.replace(/^@gpui-(?:vue|react|svelte)\/example-/, "")
 const executableName = `gpui-${framework}-${exampleName}${process.platform === "win32" ? ".exe" : ""}`
 const entrypoint = join(exampleRoot, "dist/main.js")
 const outfile = join(exampleRoot, `dist/${executableName}`)

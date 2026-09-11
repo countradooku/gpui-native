@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  MotionDiv,
+  MotionView,
   stagger,
   useGpuiTimeline,
   type EventPayload,
@@ -158,7 +158,7 @@ function update(next: TimelineState): void {
     </div>
 
     <div :style="panelStyle">
-      <MotionDiv
+      <MotionView
         v-for="([label, accent], index) in cards"
         :key="label"
         :initial="{ opacity: 0, left: -42, borderRadius: 3 }"
@@ -182,10 +182,10 @@ function update(next: TimelineState): void {
           }"
         />
         <div :style="{ fontWeight: 650 }">{{ label }}</div>
-      </MotionDiv>
+      </MotionView>
     </div>
 
-    <MotionDiv
+    <MotionView
       :initial="{ opacity: 0.4, left: 0 }"
       :animate="runnerKeyframes"
       :transition="runnerTransition"

@@ -1,7 +1,9 @@
 import {
-  GpuiDiv,
-  GpuiInput,
-  GpuiTextElement,
+  Button,
+  Column,
+  Row,
+  TextInput,
+  Text,
   useWindowSize,
   type StyleDesc,
 } from "@gpui-native/react"
@@ -17,7 +19,7 @@ export default function App() {
   const [name, setName] = useState("React")
   const size = useWindowSize()
   return (
-    <GpuiDiv
+    <Column
       style={{
         width: "100%",
         height: "100%",
@@ -29,42 +31,30 @@ export default function App() {
         color: "#f8fafc",
       }}
     >
-      <GpuiTextElement style={{ fontSize: 30, fontWeight: 700 }}>Hello, {name}</GpuiTextElement>
-      <GpuiInput
+      <Text style={{ fontSize: 30, fontWeight: 700 }}>Hello, {name}</Text>
+      <TextInput
         testId="name"
         value={name}
         onChange={(event) => setName(event.value ?? "")}
         style={{ width: 280, padding: 12, backgroundColor: "#1e293b" }}
       />
-      <GpuiTextElement testId="count" style={{ fontSize: 48 }}>
+      <Text testId="count" style={{ fontSize: 48 }}>
         {count}
-      </GpuiTextElement>
-      <GpuiDiv style={{ display: "flex", flexDirection: "row", gap: 12 }}>
-        <GpuiDiv
-          testId="decrement"
-          role="button"
-          tabIndex={0}
-          style={button}
-          onClick={() => setCount((value) => value - 1)}
-        >
+      </Text>
+      <Row style={{ gap: 12 }}>
+        <Button testId="decrement" style={button} onPress={() => setCount((value) => value - 1)}>
           −
-        </GpuiDiv>
-        <GpuiDiv
-          testId="increment"
-          role="button"
-          tabIndex={0}
-          style={button}
-          onClick={() => setCount((value) => value + 1)}
-        >
+        </Button>
+        <Button testId="increment" style={button} onPress={() => setCount((value) => value + 1)}>
           +
-        </GpuiDiv>
-        <GpuiDiv style={button} onClick={() => setCount(0)}>
+        </Button>
+        <Button style={button} disabled={count === 0} onPress={() => setCount(0)}>
           Reset
-        </GpuiDiv>
-      </GpuiDiv>
-      <GpuiTextElement>
+        </Button>
+      </Row>
+      <Text>
         {size.width} × {size.height} · rendered by GPUI
-      </GpuiTextElement>
-    </GpuiDiv>
+      </Text>
+    </Column>
   )
 }

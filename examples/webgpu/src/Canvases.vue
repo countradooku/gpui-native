@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GpuiCanvas, useGPUCanvas } from "@gpui-native/vue"
+import { Canvas, useGPUCanvas } from "@gpui-native/vue"
 import { onMounted, onScopeDispose, ref, watch } from "vue"
 
 import { startThreeScene } from "../../shared/three-scene.js"
@@ -42,9 +42,9 @@ onScopeDispose(() => {
 <template>
   <div :style="{ display: 'flex', flexDirection: 'column', gap: 12 }">
     <text>Compute + WGSL · 4× MSAA</text>
-    <GpuiCanvas :source="compute.id" testId="webgpu-canvas" :style="{ width, height: 300 }" />
+    <Canvas :source="compute.id" testId="webgpu-canvas" :style="{ width, height: 300 }" />
     <text>Textured Three.js · depth + 4× MSAA</text>
-    <GpuiCanvas :source="three.id" testId="three-canvas" :style="{ width, height: 300 }" />
+    <Canvas :source="three.id" testId="three-canvas" :style="{ width, height: 300 }" />
     <text v-if="error" :style="{ color: '#ff8888' }">{{ error }}</text>
   </div>
 </template>

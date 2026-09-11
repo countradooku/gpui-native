@@ -4,7 +4,7 @@
 [![GitHub Pages](https://github.com/countradooku/gpui-native/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-native/)
 [![npm](https://img.shields.io/npm/v/@gpui-native/vue)](https://www.npmjs.com/package/@gpui-native/vue)
 
-A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3 and React 19.2 have dedicated adapters with native and browser support.
+A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3, React 19.2, and Svelte 5 have dedicated adapters with native and browser support.
 
 ## Status
 
@@ -27,7 +27,7 @@ The published npm packages live under the `@gpui-native` org:
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
 for this runtime going forward: bindings for other frameworks and platforms
-(Svelte, Solid, and eventually mobile hosts) will be published there as they
+(Solid and eventually mobile hosts) will be published there as they
 land.
 
 The upstream baseline and subsequent ports are tracked in [the GPUix synchronization record](docs/upstream-sync.md).
@@ -49,6 +49,7 @@ The engine and framework adapters have separate ownership:
 - `packages/core` — framework-neutral N-API addon loader, generated ABI types, and prebuilt platform binaries. Published as `@gpui-native/core`.
 
 - `packages/react` — React reconciliation, typed JSX, hooks, headless controls, and testing APIs. See [React support and examples](docs/react.md).
+- `packages/svelte` — Svelte 5 runes, native compilation, typed components, headless controls, and testing. See [Svelte support](docs/svelte.md).
 - `packages/runtime` — shared TypeScript backend wrappers, native props, batching, events, automation, and GPU testing.
 
 Future adapters consume the shared runtime rather than depending on another framework. See
@@ -75,6 +76,17 @@ bun --filter @gpui-react/example-counter build
 bun --filter @gpui-react/example-counter start
 ```
 
+## Svelte quick start
+
+See [the Svelte guide](docs/svelte.md) for runes, native/browser compiler setup,
+bindings, snippets, controls, testing, and four runnable examples. In a checkout:
+
+```bash
+bun run build:adapters
+bun --filter @gpui-svelte/example-counter build
+bun --filter @gpui-svelte/example-counter start
+```
+
 ## Quick start
 
 Write ordinary Vue single-file components — `<template>`, `<script setup>`,
@@ -84,22 +96,23 @@ a native GPUI window instead of the DOM:
 ```vue
 <!-- App.vue -->
 <script setup lang="ts">
-import { GpuiCode, GpuiInput } from "@gpui-native/vue"
+import { Button, Code, Column, TextInput } from "@gpui-native/vue"
 import { ref } from "vue"
 
 const source = ref("const answer = 42")
 </script>
 
 <template>
-  <div :style="{ padding: 24, gap: 12, flexDirection: 'column' }">
-    <GpuiInput v-model="source" placeholder="Type some TypeScript" />
-    <GpuiCode
+  <Column :style="{ padding: 24, gap: 12 }">
+    <TextInput v-model="source" placeholder="Type some TypeScript" />
+    <Button :style="{ padding: 10, background: '#334155' }" @press="source = ''">Clear</Button>
+    <Code
       :code="source"
       language="typescript"
       :showLineNumbers="true"
       :style="{ padding: 12, background: '#111827', borderRadius: 8 }"
     />
-  </div>
+  </Column>
 </template>
 ```
 
@@ -120,19 +133,49 @@ browser app, the same call renders a native element.
 
 `render()` owns one persistent native window and hot-remounts its Vue root. On Linux and Windows it keeps Node alive while GPUI's threaded window is open; closing the final window releases that handle. `resetRender()` unmounts Vue, destroys the retained tree, and closes the native event loop immediately.
 
-## Native host elements
+## Components
 
-| Host tag            | Vue component                | Native implementation                                                                                                 |
-| ------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `div`, `text`       | `GpuiDiv`, `GpuiTextElement` | GPUI layout, selectable text, focus, mouse/keyboard/scroll events, and pseudo-state styles                            |
-| `input`, `textarea` | `GpuiInput`, `GpuiTextarea`  | Native editable GPUI text, caret, selection, clipboard, IME, submit/change events, read-only mode, and `v-model`      |
-| `img`, `svg`        | `GpuiImage`, `GpuiSvg`       | Native image loading, object-fit, fallback content, and tinted SVG data                                               |
-| `anchored`          | `GpuiAnchored`               | Deferred anchored layers with side/alignment, offsets, collision switching/snapping, priority, and occlusion          |
-| `code`              | `GpuiCode`                   | Syntect language detection, cached syntax highlighting, optional line numbers, horizontal scrolling, and selection    |
-| `diff`              | `GpuiDiff`                   | Unified-diff parsing, word highlights, collapsed files, show-more rows, line events, and default-on virtual scrolling |
-| `markdown`          | `GpuiMarkdown`               | GFM parsing, headings, lists, tables, tasks, inline code, fenced code highlighting, selection, and link events        |
-| `virtual-list`      | `GpuiVirtualList`            | Variable-height GPUI list virtualization, overdraw, alignment, follow-tail, and imperative scrolling                  |
-| `canvas`            | `GpuiCanvas`                 | Retained paths, lines, polylines, rectangles, and circles, tessellated only when commands change                      |
+Use the same component names in Vue, React, and Svelte, on desktop and in the browser.
+`View` is a bare GPUI container; `Row` and `Column` add flex layout defaults.
+`ScrollView` adds vertical scrolling, or horizontal scrolling with `horizontal`.
+Give it a bounded `height` or `width` so content can overflow. All three layout
+helpers lower to one native `div`, with your `style` overriding their defaults.
+
+`Button` is unstyled and accepts arbitrary children (text, icons, or layouts).
+Use `@press` in Vue or `onPress` in React and Svelte for pointer/accessibility clicks, Enter
+key down, and Space key release. Held keys and Ctrl/Alt/Cmd shortcuts do not
+activate it; blur or disabling cancels a pending Space press. `disabled` blocks
+activation and removes the tab stop. `onClick` / `@click` remains the raw click
+callback; other host events, styles, motion and accessibility labels pass through.
+The app owns padding, colors, hover/active styles, and disabled appearance. The
+button supplies `role="button"`, `tabIndex={0}`, a pointer cursor, and
+`userSelect: "none"`; host styles and enabled tab order remain overridable.
+
+```tsx
+<Button
+  disabled={saving}
+  onPress={save}
+  style={{ padding: 12, background: "#334155", borderRadius: 8 }}
+>
+  <Text>Save changes</Text>
+</Button>
+```
+
+See [component names and migration](docs/components.md) for the complete API.
+
+### Native primitives
+
+| Host tag            | Vue / React / Svelte component | Native implementation                                                                                                 |
+| ------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `div`, `text`       | `View`, `Text`                 | GPUI layout, selectable text, focus, mouse/keyboard/scroll events, and pseudo-state styles                            |
+| `input`, `textarea` | `TextInput`, `TextArea`        | Native editable GPUI text, caret, selection, clipboard, IME, submit/change events, read-only mode, and `v-model`      |
+| `img`, `svg`        | `Image`, `Svg`                 | Native image loading, object-fit, fallback content, and tinted SVG data                                               |
+| `anchored`          | `Anchored`                     | Deferred anchored layers with side/alignment, offsets, collision switching/snapping, priority, and occlusion          |
+| `code`              | `Code`                         | Syntect language detection, cached syntax highlighting, optional line numbers, horizontal scrolling, and selection    |
+| `diff`              | `Diff`                         | Unified-diff parsing, word highlights, collapsed files, show-more rows, line events, and default-on virtual scrolling |
+| `markdown`          | `Markdown`                     | GFM parsing, headings, lists, tables, tasks, inline code, fenced code highlighting, selection, and link events        |
+| `virtual-list`      | `VirtualList`                  | Variable-height GPUI list virtualization, overdraw, alignment, follow-tail, and imperative scrolling                  |
+| `canvas`            | `Canvas`                       | Retained paths, lines, polylines, rectangles, and circles, tessellated only when commands change                      |
 
 All host tags remain directly usable with `h("code", props)` or templates/JSX. The named components provide discoverable TypeScript props; input components additionally translate Vue `v-model` to native `value`/`change` semantics.
 
@@ -144,7 +187,7 @@ The Vue package includes headless, shadcn-shaped controls rendered entirely thro
 - `Combobox`, `ComboboxInput`, `ComboboxTrigger`, `ComboboxValue`, filtered/scoped lists, items, empty state, groups, labels, and separators.
 - `TooltipProvider`, `Tooltip`, `TooltipTrigger`, and `TooltipContent`.
 - `FloatingLayer` for reusable anchored content.
-- `motion.div` and `MotionDiv` for native tweens, offset keyframes, physical springs, repeats, and staggered entrances.
+- `motion.View` and `MotionView` for native tweens, offset keyframes, physical springs, repeats, and staggered entrances.
 
 Select and Combobox support ordinary `v-model`/`modelValue`; named `value`
 models remain available for compatibility. Open state uses `v-model:open`.
@@ -191,7 +234,7 @@ Canvas commands are retained and tessellated in Rust. Vue sends geometry only
 when the `commands` prop changes; paint frames do not execute JavaScript:
 
 ```ts
-h(GpuiCanvas, {
+h(Canvas, {
   style: { width: 640, height: 240 },
   commands: [
     { type: "rect", x: 0, y: 0, width: 640, height: 240, fill: "#10141c" },
@@ -212,7 +255,7 @@ Motion is evaluated on GPUI animation frames and shares a controllable window
 timeline:
 
 ```ts
-h(MotionDiv, {
+h(MotionView, {
   initial: { opacity: 0, left: -24 },
   animate: [
     { at: 0, value: { opacity: 0, left: -24 } },
@@ -318,7 +361,7 @@ bun run bench
 bun --filter @gpui-vue/example-canvas start
 ```
 
-`bun run build` produces the full native addon, the Vue package, and every example. Oxc
+`bun run build` produces the full native addon, all three framework adapters, and every example. Oxc
 transforms the package TypeScript and generates source maps, while Vite 8's Oxc pipeline
 transforms and minifies the Vue examples. Oxlint and Oxfmt are enforced by `bun run check`;
 TypeScript and `vue-tsc` remain enabled for declaration generation and strict type checking.
@@ -381,7 +424,7 @@ The full native component engine is adapted from GPUix's Apache-2.0 native packa
 
 ### WebGPU canvas
 
-React and Vue can display real WebGPU rendering through a shared canvas source, with
+React, Vue, and Svelte can display real WebGPU rendering through a shared canvas source, with
 WGSL, compute, texture uploads, cube maps, MSAA, and Three.js coverage. See the
 [WebGPU guide](docs/webgpu.md) for runnable examples, lifecycle rules, measured
 transport benchmarks, Bun/Node support, and the tested platform matrix. Direct

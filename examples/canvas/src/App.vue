@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GpuiCanvas, type CanvasCommand, type EventPayload, type StyleDesc } from "@gpui-native/vue"
+import { Canvas, type CanvasCommand, type EventPayload, type StyleDesc } from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 const colors = {
@@ -142,7 +142,7 @@ function handleMouseMove(event: EventPayload): void {
       }}
     </div>
 
-    <GpuiCanvas
+    <Canvas
       :commands="commands"
       :style="{ width: 720, height: 320, borderRadius: 12, overflow: 'hidden' }"
       @mouse-move="handleMouseMove"

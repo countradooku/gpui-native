@@ -2,6 +2,11 @@ import { initGpuiWeb } from "@gpui-native/vue"
 
 const example = document.body.dataset.example
 const loaders: Record<string, () => Promise<unknown>> = {
+  "svelte-counter": () => import("../../examples/svelte-counter/src/main.js"),
+  "svelte-showcase": () => import("../../examples/svelte-showcase/src/main.js"),
+  "svelte-multiple-windows": () => import("../../examples/svelte-multiple-windows/src/main.js"),
+  "svelte-webgpu": () => import("../../examples/svelte-webgpu/src/web.js"),
+
   "react-webgpu": () => import("../../examples/react-webgpu/src/web.js"),
   webgpu: () => import("../../examples/webgpu/src/web.js"),
   "react-counter": () => import("../../examples/react-counter/src/main.js"),

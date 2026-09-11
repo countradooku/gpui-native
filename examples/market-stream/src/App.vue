@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {
-  GpuiCanvas,
-  GpuiInput,
-  GpuiVirtualList,
+  Canvas,
+  TextInput,
+  VirtualList,
   nextTick,
   useElementRef,
   useGpuiWindow,
@@ -648,7 +648,7 @@ onBeforeUnmount(() => {
 
       <div :style="{ width: 1, height: 26, background: colors.border }" />
 
-      <GpuiInput
+      <TextInput
         v-model="query"
         testId="market-search"
         placeholder="Search 100,000 symbols, companies, venues…"
@@ -874,7 +874,7 @@ onBeforeUnmount(() => {
               <text :style="columnStyle(68, 'right')">STATE</text>
             </div>
 
-            <GpuiVirtualList
+            <VirtualList
               ref="tableRef"
               :item-count="filteredCount"
               :window-start="windowStart"
@@ -945,7 +945,7 @@ onBeforeUnmount(() => {
                   <div :style="healthStyle(item.row.health)">{{ item.row.health }}</div>
                 </div>
               </div>
-            </GpuiVirtualList>
+            </VirtualList>
 
             <div
               :style="{
@@ -1002,10 +1002,7 @@ onBeforeUnmount(() => {
                 <div :style="{ flexGrow: 1 }" />
                 <text :style="{ fontSize: 9, color: colors.lime }">● LIVE</text>
               </div>
-              <GpuiCanvas
-                :commands="chartCommands"
-                :style="{ width: 308, height: 154, margin: 8 }"
-              />
+              <Canvas :commands="chartCommands" :style="{ width: 308, height: 154, margin: 8 }" />
               <div
                 :style="{
                   display: 'flex',

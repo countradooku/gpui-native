@@ -284,7 +284,7 @@ function shallowEqualStyle(left: StyleDesc, right: StyleDesc): boolean {
   return leftEntries.every(([key, value]) => Object.is(value, right[key as keyof StyleDesc]))
 }
 
-function equalJsonValue(left: unknown, right: unknown, depth = 0): boolean {
+export function equalJsonValue(left: unknown, right: unknown, depth = 0): boolean {
   if (Object.is(left, right)) return true
   if (depth >= 16 || left === null || right === null) return false
   if (Array.isArray(left)) {
