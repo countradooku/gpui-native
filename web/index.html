@@ -185,7 +185,7 @@
       <aside>
         <header>
           <h1>gpui-native</h1>
-          <p>Vue 3 rendered by Zed GPUI, compiled to WebAssembly for the browser.</p>
+          <p>Vue, React, and Svelte rendered by Zed GPUI through WebAssembly.</p>
         </header>
         <nav aria-label="Examples">
           <button data-example="market-stream">100K market stream</button>
@@ -219,18 +219,11 @@
       </section>
     </main>
     <script type="module">
-      const names = new Set([
-        "market-stream",
-        "counter",
-        "canvas",
-        "motion-timeline",
-        "multiple-windows",
-        "audio-buffer",
-      ])
+      const buttons = [...document.querySelectorAll("button[data-example]")]
+      const names = new Set(buttons.map((button) => button.dataset.example))
       const frame = document.querySelector("#example-frame")
       const current = document.querySelector("#current-example")
       const open = document.querySelector("#open-example")
-      const buttons = [...document.querySelectorAll("[data-example]")]
 
       function select(requested) {
         const name = names.has(requested) ? requested : "counter"
