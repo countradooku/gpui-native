@@ -1,6 +1,6 @@
 {
   "name": "@gpui-native/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-neutral N-API bindings for GPUI Native",
   "homepage": "https://github.com/countradooku/gpui-native#readme",
   "bugs": {
@@ -15,7 +15,9 @@
   "files": [
     "index.cjs",
     "index.d.ts",
-    "*.node"
+    "gpui-native.darwin-arm64.node",
+    "gpui-native.linux-x64-gnu.node",
+    "gpui-native.win32-x64-msvc.node"
   ],
   "main": "index.cjs",
   "types": "index.d.ts",

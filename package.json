@@ -1,5 +1,6 @@
 {
   "name": "gpui-native-monorepo",
+  "version": "0.2.0",
   "private": true,
   "description": "Framework-neutral GPU-accelerated UI runtime for Zed's GPUI",
   "homepage": "https://github.com/countradooku/gpui-native#readme",

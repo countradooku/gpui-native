@@ -1,5 +1,6 @@
 {
   "name": "@gpui-examples/webgpu-scene",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "dependencies": {

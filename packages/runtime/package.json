@@ -1,6 +1,6 @@
 {
   "name": "@gpui-native/runtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-neutral TypeScript runtime for GPUI Native",
   "homepage": "https://github.com/countradooku/gpui-native#readme",
   "license": "Apache-2.0",

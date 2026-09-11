@@ -1,6 +1,6 @@
 {
   "name": "@gpui-native/vue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Vue 3 custom renderer bindings for Zed's GPUI",
   "homepage": "https://github.com/countradooku/gpui-native#readme",
   "bugs": {

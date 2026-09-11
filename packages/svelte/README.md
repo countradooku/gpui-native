@@ -22,4 +22,4 @@ copy of its client runtime. GPUI owns layout, input, text and painting.
 See [the complete guide](https://github.com/countradooku/gpui-native/blob/main/docs/svelte.md)
 for native/browser setup, supported syntax, examples, tests and platform limits.
 This is a native Svelte target; DOM libraries, CSS stylesheets, SSR and hydration
-are not supported. The package follows GPUI Native's early 0.1.x release status.
+are not supported. The package follows GPUI Native's early 0.2.x release status.

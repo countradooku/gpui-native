@@ -6,7 +6,7 @@ using `$state`, `$derived`, `$effect`, `$props`, `$bindable`, snippets, keyed
 `{#each}`, `{#if}`, and `{#await}`. The adapter uses Svelte **5.57.0**, pinned
 exactly because its compiled output and client runtime must agree.
 
-This adapter is part of the early `0.1.x` codebase. Its tests and examples cover
+This adapter is part of the early `0.2.x` codebase. Its tests and examples cover
 native and browser integration; it does not make GPUI's existing experimental
 platform or WebGPU capabilities production-qualified on every device.
 

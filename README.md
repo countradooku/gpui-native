@@ -8,7 +8,7 @@ A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a re
 
 ## Status
 
-GPUI Native is an early `0.1.x` release. Native rendering runs on Apple Silicon
+GPUI Native is an early `0.2.x` release. Native rendering runs on Apple Silicon
 macOS, x64 Linux (Wayland/X11), and x64 Windows, with a WebAssembly renderer
 backing the browser examples. Every commit passes the full quality gate —
 formatting, Oxlint, TypeScript, `vue-tsc`, clippy with warnings denied, and the
@@ -24,6 +24,10 @@ The published npm packages live under the `@gpui-native` org:
 | [`@gpui-native/vue`](https://www.npmjs.com/package/@gpui-native/vue)   | The Vue 3 renderer, components, composables, and testing APIs     |
 | [`@gpui-native/core`](https://www.npmjs.com/package/@gpui-native/core) | Prebuilt N-API binaries for macOS (arm64), Linux x64, Windows x64 |
 | [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                   | Alias of `@gpui-native/vue` kept for the shorter name             |
+
+The 0.2.0 release also publishes `@gpui-native/runtime`, `@gpui-native/react`,
+and `@gpui-native/svelte`. All five scoped packages and the `gpui-vue` alias
+use the same release version. See [the full 0.2.0 release notes](docs/releases/v0.2.0.md).
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
 for this runtime going forward: bindings for other frameworks and platforms
@@ -395,11 +399,11 @@ canvases in the browser example.
 CI runs formatting, clippy with warnings denied, Oxc, Vue, TypeScript, and Rust
 checks plus one native target per OS:
 Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
-`v0.1.0` creates a GitHub Release containing those bindings and publishes
-`gpui-vue` and `@gpui-native/core` to npm after each platform passes its
+`v0.2.0` creates a GitHub Release containing those bindings and publishes
+all five `@gpui-native` packages and the `gpui-vue` alias to npm after each platform passes its
 headless native smoke test and the generated declaration file is checked for
 drift. Publishing requires an `NPM_TOKEN` repository secret with publish
-access to both packages.
+access to every release package.
 See [`examples/README.md`](./examples/README.md) for runnable canvas,
 chat, motion/timeline, multi-window, audio-buffer, and counter demos. Pass
 `{ headless: true }` to `renderer.init()` when a retained tree is needed

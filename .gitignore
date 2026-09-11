@@ -16,3 +16,4 @@ packages/core/index.js
 
 # Compiled Svelte test fixtures
 packages/svelte/test/.compiled/
+/release-assets/

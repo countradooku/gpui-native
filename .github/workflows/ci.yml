@@ -228,20 +228,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Download native bindings
         uses: actions/download-artifact@v8
         with:
           pattern: bindings-*
-          path: release-assets
+          path: packages/core
           merge-multiple: true
+
+      - name: Build and package every adapter
+        run: |
+          bun run build:adapters
+          bun scripts/pack-release.mts
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release-assets/*.node \
-            --generate-notes \
-            --title "gpui-native $GITHUB_REF_NAME"
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --verify-tag \
+            --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
+            --title "GPUI Native $GITHUB_REF_NAME"
 
   publish:
     name: Publish to npm
@@ -257,6 +269,15 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Verify npm publishing credentials are configured
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_CONFIG_TOKEN" ]; then
+            echo "Configure the repository NPM_TOKEN secret before publishing packages."
+            exit 1
+          fi
 
       - name: Verify tag matches package versions
         run: |
