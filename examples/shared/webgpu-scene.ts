@@ -7,11 +7,9 @@ export async function startWebGPUScene(
   gpu: GPU,
   onError: (error: unknown) => void,
 ): Promise<() => void> {
-  const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
-  if (!adapter) throw new Error("No WebGPU adapter is available")
-  const device = await adapter.requestDevice()
+  const device = await canvas.requestDevice(gpu)
   if (canvas.destroyed) {
-    device.destroy()
+    if (canvas.ownsDevice) device.destroy()
     return () => {}
   }
   let stopped = false
@@ -23,7 +21,7 @@ export async function startWebGPUScene(
     clearTimeout(timer)
     msaa?.destroy()
     uniforms?.destroy()
-    device.destroy()
+    if (canvas.ownsDevice) device.destroy()
   }
   try {
     canvas.configure({ device, format: "rgba8unorm", alphaMode: "opaque" })
@@ -53,7 +51,19 @@ export async function startWebGPUScene(
       stop()
       return stop
     }
-    uniforms = device.createBuffer({ size: 16, usage: 64 | 8 })
+    const compute = await device.createComputePipelineAsync({
+      layout: "auto",
+      compute: {
+        module: device.createShaderModule({
+          code: "@group(0) @binding(0) var<storage, read_write> angle: array<f32>; @compute @workgroup_size(1) fn main() { angle[0] += 0.01; }",
+        }),
+      },
+    })
+    uniforms = device.createBuffer({ size: 16, usage: 64 | 8 | 128 })
+    const computeGroup = device.createBindGroup({
+      layout: compute.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: uniforms } }],
+    })
     const bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: uniforms } }],
@@ -64,18 +74,31 @@ export async function startWebGPUScene(
       format: "rgba8unorm",
       usage: 16,
     })
-    const samples = msaa.createView()
-    const values = new Float32Array(4)
-    const started = performance.now()
+    let samples = msaa.createView()
+    let size = `${canvas.width}x${canvas.height}`
     const frame = async () => {
       if (stopped || canvas.destroyed) {
         stop()
         return
       }
       try {
-        values[0] = (performance.now() - started) / 1800
-        device.queue.writeBuffer(uniforms!, 0, values)
+        if (size !== `${canvas.width}x${canvas.height}`) {
+          msaa?.destroy()
+          msaa = device.createTexture({
+            size: [canvas.width, canvas.height],
+            sampleCount: 4,
+            format: "rgba8unorm",
+            usage: 16,
+          })
+          samples = msaa.createView()
+          size = `${canvas.width}x${canvas.height}`
+        }
         const encoder = device.createCommandEncoder()
+        const computePass = encoder.beginComputePass()
+        computePass.setPipeline(compute)
+        computePass.setBindGroup(0, computeGroup)
+        computePass.dispatchWorkgroups(1)
+        computePass.end()
         const pass = encoder.beginRenderPass({
           colorAttachments: [
             {

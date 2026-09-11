@@ -4,6 +4,10 @@
   "type": "module",
   "dependencies": {
     "@gpui-native/runtime": "workspace:^",
-    "@webgpu/types": "^0.1.72"
+    "@webgpu/types": "^0.1.72",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.0"
   }
 }

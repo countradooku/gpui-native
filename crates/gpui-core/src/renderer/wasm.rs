@@ -1,3 +1,4 @@
+use super::backend::Backend;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -40,6 +41,97 @@ impl WebGpuiRenderer {
             inner: GpuiRenderer::new(Some(callback)),
             events,
         }
+    }
+
+    #[wasm_bindgen(js_name = canvasPresentation)]
+    pub fn canvas_presentation(&self) -> String {
+        "shared-wgpu".into()
+    }
+
+    #[wasm_bindgen(js_name = canvasGpuDevice)]
+    pub fn canvas_gpu_device(&self) -> Option<JsValue> {
+        self.inner
+            .tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .shared_gpu
+            .as_ref()
+            .and_then(|engine| engine.device.webgpu_object())
+    }
+
+    #[wasm_bindgen(js_name = createCanvasTexture)]
+    pub fn create_canvas_texture(&self, descriptor: &str) -> Result<JsValue, JsValue> {
+        let engine = self
+            .inner
+            .tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .shared_gpu
+            .clone()
+            .ok_or_else(|| js_error("Window GPU device is not ready"))?;
+        let value = serde_json::from_str(descriptor).map_err(js_error)?;
+        let id = engine.create("texture", &value).map_err(js_error)?;
+        let texture = engine
+            .texture(id)
+            .map_err(js_error)?
+            .webgpu_object()
+            .ok_or_else(|| js_error("GPUI is using WebGL, not WebGPU"))?;
+        let result = js_sys::Object::new();
+        js_sys::Reflect::set(&result, &"texture".into(), &texture)?;
+        js_sys::Reflect::set(&result, &"handle".into(), &JsValue::from(id))?;
+        Ok(result.into())
+    }
+
+    #[wasm_bindgen(js_name = releaseCanvasTexture)]
+    pub fn release_canvas_texture(&self, id: u32) {
+        if let Some(engine) = &self.inner.tree.lock().canvas_frames.lock().shared_gpu {
+            engine.release(id);
+        }
+    }
+
+    #[wasm_bindgen(js_name = resetCanvasSource)]
+    pub fn reset_canvas_source(&self, id: u32) -> Result<(), JsValue> {
+        self.inner
+            .tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .reset(id)
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = presentCanvasTexture)]
+    pub async fn present_canvas_texture(
+        &self,
+        id: u32,
+        texture: u32,
+        opaque: bool,
+    ) -> Result<bool, JsValue> {
+        let (source, engine) = {
+            let frames = self.inner.tree.lock().canvas_frames.clone();
+            let frames = frames.lock();
+            let source = frames
+                .direct
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| js_error("Unknown canvas source"))?;
+            let engine = frames
+                .shared_gpu
+                .clone()
+                .ok_or_else(|| js_error("Window GPU is unavailable"))?;
+            (source, engine)
+        };
+        let texture = engine.texture(texture).map_err(js_error)?;
+        let presented = source
+            .present(&engine, texture, opaque)
+            .await
+            .map_err(js_error)?;
+        if presented {
+            self.inner.request_invalidate().map_err(js_error)?;
+        }
+        Ok(presented)
     }
 
     #[wasm_bindgen(js_name = createCanvasSource)]

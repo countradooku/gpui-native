@@ -1,12 +1,15 @@
 /// <reference types="@webgpu/types" preserve="true" />
 
+import { nativeDevice, nativeTexture } from "./gpu-interop.js"
 import type { NativeRenderer } from "./native.js"
 
 export interface GPUCanvasOptions {
+  /** Direct GPU snapshots are the default. Readback must be selected explicitly. */
+  presentation?: "direct" | "async-readback"
   renderer: NativeRenderer
   width?: number
   height?: number
-  /** Maximum outstanding readbacks. A busy presenter drops new frames. Default 2. */
+  /** Maximum outstanding presentations. A busy presenter drops new frames. Default 2. */
   maxFramesInFlight?: number
 }
 
@@ -18,8 +21,8 @@ export interface GPUCanvasStats {
   inFlight: number
   bytesPresented: number
   lastPresentMs: number
-  /** CPU readback is used on every platform; this is not zero-copy. */
-  transport: "async-readback"
+  /** Actual transport; GPU copy never maps pixel bytes for presentation. */
+  transport: "gpu-copy" | "async-readback"
 }
 
 type Slot = { buffer: GPUBuffer | undefined; size: number; busy: boolean }
@@ -40,7 +43,7 @@ function dimension(value: number): number {
  * A WebGPU texture target composited by GPUI's canvas primitive. It supplies the
  * canvas methods used by WebGPU renderers, but is not a DOM HTMLCanvasElement.
  * Call present() after submitting rendering commands. GPU objects are real
- * browser/Dawn objects; GPUI does not wrap their API or suppress validation.
+ * browser objects or the shared Rust wgpu binding; validation failures remain observable.
  */
 export class GPUCanvas extends EventTarget {
   readonly id: number
@@ -48,6 +51,11 @@ export class GPUCanvas extends EventTarget {
   readonly #renderer: Required<
     Pick<NativeRenderer, "createCanvasSource" | "presentCanvasFrame" | "destroyCanvasSource">
   >
+  readonly #host: NativeRenderer
+  #webHandle: number | undefined
+  #ownsDevice = false
+  readonly #direct?: NativeRenderer["presentCanvasTexture"]
+  readonly #reset?: NativeRenderer["resetCanvasSource"]
   readonly #slots: Slot[]
   readonly #context: GPUCanvasContext
   #width: number
@@ -73,6 +81,7 @@ export class GPUCanvas extends EventTarget {
   constructor(options: GPUCanvasOptions) {
     super()
     const { renderer } = options
+    this.#host = renderer
     if (
       !renderer.createCanvasSource ||
       !renderer.presentCanvasFrame ||
@@ -80,6 +89,15 @@ export class GPUCanvas extends EventTarget {
     ) {
       throw new Error("This GPUI renderer does not support GPU canvas frame transport")
     }
+    if ((options.presentation ?? "direct") === "direct") {
+      if (!renderer.presentCanvasTexture || renderer.canvasPresentation?.() === "unsupported")
+        throw new Error(
+          "This renderer has no direct GPU presentation; choose presentation: async-readback explicitly",
+        )
+      this.#direct = renderer.presentCanvasTexture.bind(renderer)
+      this.#stats.transport = "gpu-copy"
+    }
+    this.#reset = renderer.resetCanvasSource?.bind(renderer)
     this.#width = dimension(options.width ?? 300)
     this.#height = dimension(options.height ?? 150)
     this.#validateSize(this.#width, this.#height)
@@ -136,6 +154,49 @@ export class GPUCanvas extends EventTarget {
     return type === "webgpu" ? this.#context : null
   }
 
+  /** Whether requestDevice() created an owned device that the caller must destroy. */
+  get ownsDevice(): boolean {
+    return this.#ownsDevice
+  }
+
+  /** Acquire the compositor device where required; otherwise create an owned device. */
+  async requestDevice(gpu: GPU, descriptor: GPUDeviceDescriptor = {}): Promise<GPUDevice> {
+    this.#assertAlive()
+    if (this.#direct && this.#host.canvasPresentation?.() === "shared-wgpu") {
+      const deadline = performance.now() + 10000
+      while (performance.now() < deadline) {
+        this.#assertAlive()
+        const device = this.#host.canvasGpuDevice?.()
+        if (device) {
+          for (const feature of descriptor.requiredFeatures ?? [])
+            if (!device.features.has(feature))
+              throw new Error(`GPUI shared device does not enable ${feature}`)
+          for (const [name, required] of Object.entries(descriptor.requiredLimits ?? {})) {
+            const actual = (device.limits as unknown as Record<string, number>)[name]
+            const satisfied = name.startsWith("min") ? actual! <= required! : actual! >= required!
+            if (actual === undefined || !satisfied)
+              throw new Error(`GPUI shared device cannot satisfy ${name}=${required}`)
+          }
+          this.#ownsDevice = false
+          return device
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error(
+        "GPUI's WebGPU device did not become ready; WebGL renderers require explicit async-readback",
+      )
+    }
+    const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
+    if (!adapter) throw new Error("No WebGPU adapter is available")
+    const device = await adapter.requestDevice(descriptor)
+    if (this.#destroyed) {
+      device.destroy()
+      throw new Error("GPU canvas destroyed while creating its device")
+    }
+    this.#ownsDevice = true
+    return device
+  }
+
   configure(configuration: GPUCanvasConfiguration): void {
     this.#assertAlive()
     if (
@@ -160,6 +221,14 @@ export class GPUCanvas extends EventTarget {
     ) {
       throw new RangeError("GPU canvas dimensions exceed the device limit")
     }
+    if (
+      this.#direct &&
+      !(nativeDevice in configuration.device) &&
+      configuration.device !== this.#host.canvasGpuDevice?.()
+    )
+      throw new Error(
+        "Direct native presentation requires the GPUI wgpu device; browser or foreign devices require explicit async-readback",
+      )
     this.#releaseGPU()
     this.#configuration = { ...configuration, viewFormats: [...(configuration.viewFormats ?? [])] }
     if (!this.#watchedDevices.has(configuration.device)) {
@@ -203,6 +272,7 @@ export class GPUCanvas extends EventTarget {
     this.#assertAlive()
     const configuration = this.#configuration
     if (!configuration) throw new Error("Configure the WebGPU canvas before presenting")
+    if (this.#direct) return this.#presentDirect(configuration)
     const slot = this.#slots.find((candidate) => !candidate.busy)
     if (!slot) {
       this.#stats.dropped++
@@ -281,6 +351,44 @@ export class GPUCanvas extends EventTarget {
     }
   }
 
+  async #presentDirect(configuration: GPUCanvasConfiguration): Promise<boolean> {
+    if (this.#stats.inFlight >= this.#slots.length) {
+      this.#stats.dropped++
+      return false
+    }
+    const texture = this.#currentTexture()
+    const generation = this.#generation
+    const started = performance.now()
+    this.#stats.inFlight++
+    this.#stats.submitted++
+    try {
+      const result = await this.#direct!(
+        this.id,
+        nativeDevice in configuration.device
+          ? Reflect.get(configuration.device, nativeDevice)
+          : configuration.device,
+        this.#webHandle ?? (Reflect.get(texture, nativeTexture) as number),
+        (configuration.alphaMode ?? "opaque") === "opaque",
+      )
+      if (!result || generation !== this.#generation || this.#destroyed) {
+        this.#stats.dropped++
+        return false
+      }
+      this.#stats.presented++
+      this.#stats.lastPresentMs = performance.now() - started
+      return true
+    } catch (error) {
+      if (generation !== this.#generation || this.#destroyed) {
+        this.#stats.dropped++
+        return false
+      }
+      this.#stats.failed++
+      throw error
+    } finally {
+      this.#stats.inFlight--
+    }
+  }
+
   destroy(): void {
     if (this.#destroyed) return
     this.#destroyed = true
@@ -297,7 +405,10 @@ export class GPUCanvas extends EventTarget {
   }
   #releaseGPU(): void {
     this.#generation++
+    this.#reset?.(this.id)
     this.#texture?.destroy()
+    if (this.#webHandle !== undefined) this.#host.releaseCanvasTexture?.(this.#webHandle)
+    this.#webHandle = undefined
     this.#texture = undefined
     for (const slot of this.#slots) {
       slot.buffer?.destroy()
@@ -309,13 +420,22 @@ export class GPUCanvas extends EventTarget {
     this.#assertAlive()
     const configuration = this.#configuration
     if (!configuration) throw new Error("Configure the WebGPU canvas before acquiring a texture")
-    return (this.#texture ??= configuration.device.createTexture({
+    if (this.#texture) return this.#texture
+    const descriptor: GPUTextureDescriptor = {
       label: "GPUI canvas target",
       size: { width: this.width, height: this.height },
       format: configuration.format,
       usage: (configuration.usage ?? RENDER_ATTACHMENT) | COPY_SRC,
       viewFormats: configuration.viewFormats ?? [],
-    }))
+    }
+    if (this.#direct && this.#host.createCanvasTexture) {
+      const target = this.#host.createCanvasTexture(descriptor)
+      this.#webHandle = target.handle
+      this.#texture = target.texture
+    } else {
+      this.#texture = configuration.device.createTexture(descriptor)
+    }
+    return this.#texture
   }
 }
 

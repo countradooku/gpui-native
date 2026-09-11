@@ -15,7 +15,7 @@ export default defineConfig({
       fileName: "main",
     },
     rollupOptions: {
-      external: ["@gpui-native/vue", "vue"],
+      external: [/^@gpui-native\//, /^vue(?:\/|$)/],
     },
   },
 })

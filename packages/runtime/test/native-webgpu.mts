@@ -11,6 +11,8 @@ import {
   Mesh,
   BoxGeometry,
   MeshBasicMaterial,
+  DataTexture,
+  RGBAFormat,
 } from "three/webgpu"
 
 import { createNativeRenderer } from "../src/native-addon.js"
@@ -27,7 +29,12 @@ const renderer = hasNativeTestRenderer
   ? new TestRenderer({ width: 80, height: 40 })
   : createNativeRenderer()
 if (!hasNativeTestRenderer) renderer.init?.({ headless: true })
-const canvas = createGPUCanvas({ renderer, width: 65, height: 16 })
+const canvas = createGPUCanvas({
+  presentation: process.env.GPUI_GPU_PRESENTATION === "direct" ? "direct" : "async-readback",
+  renderer,
+  width: 65,
+  height: 16,
+})
 const directory = mkdtempSync(join(tmpdir(), "gpui-webgpu-"))
 const resources: { destroy(): void }[] = []
 function screenshotPixel(name: string) {
@@ -177,7 +184,9 @@ try {
     antialias: true,
   })
   const geometry = new BoxGeometry()
-  const material = new MeshBasicMaterial({ color: 0x00ff00 })
+  const texture = new DataTexture(new Uint8Array([0, 255, 0, 255]), 1, 1, RGBAFormat)
+  texture.needsUpdate = true
+  const material = new MeshBasicMaterial({ map: texture })
   try {
     three.setSize(65, 16, false)
     const scene = new Scene()
@@ -192,6 +201,7 @@ try {
   } finally {
     geometry.dispose()
     material.dispose()
+    texture.dispose()
     three.dispose()
     restoreGlobals()
   }
@@ -201,7 +211,7 @@ try {
   const validation = await device.popErrorScope()
   assert.equal(validation, null, validation?.message)
   console.log(
-    "WebGPU native smoke passed: compute, cube uploads/sampling, 4x MSAA, padded readback, RGBA/BGRA, alpha compositing, Three.js, destruction",
+    "WebGPU native smoke passed: compute, cube uploads/sampling, 4x MSAA, padded readback, RGBA/BGRA, alpha compositing, textured Three.js, destruction",
     canvas.stats,
   )
 } finally {

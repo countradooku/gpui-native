@@ -70,3 +70,17 @@ The committed native declarations include `TestGpuiRenderer`, which is available
 only in macOS and Windows builds with `test-support`. Linux production builds
 do not export that class. CI verifies the complete generated declarations on
 the supported test-renderer platforms.
+
+## GPU canvas
+
+The shared Rust `gpu` engine owns wgpu resources, command encoding and validated
+submission. `gpu_binding` exposes Node-API operations to Bun and Node;
+`renderer/wasm` exposes the compositor's existing browser device/texture objects.
+React and Vue share `GPUCanvas` lifecycle and presentation in `packages/runtime`.
+No framework state enters the Rust GPU engine or `packages/core`.
+
+Direct presentation publishes bounded immutable GPU snapshots with producer and
+compositor completion leases. It never sends presentation pixels through JSON,
+N-API byte arrays or the CPU image atlas. Explicit `async-readback` retains the
+older fallback. See [the GPU canvas guide](webgpu.md) for device ownership,
+upstream fork changes, platform qualification, API gaps and performance evidence.

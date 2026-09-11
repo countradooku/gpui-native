@@ -16,7 +16,7 @@ it("publishes a Vue canvas source through the shared mutation protocol and dispo
   const app = host.mount(
     defineComponent({
       setup() {
-        const canvas = useGPUCanvas({ width: 80, height: 40 })
+        const canvas = useGPUCanvas({ presentation: "async-readback", width: 80, height: 40 })
         return () => h("canvas", { source: canvas.id })
       },
     }),

@@ -5,6 +5,13 @@ export declare class GpuiRenderer {
   constructor(eventCallback?: (error: Error | null, event: EventPayload | null) => void)
   /** Allocate a renderer-owned source for the canvas `source` prop. */
   createCanvasSource(): number
+  /** Reset published images and invalidate outstanding GPU publications. */
+  resetCanvasSource(id: number): void
+  /** GPU snapshot presentation; rejects unsupported platforms and foreign devices. */
+  presentCanvasTexture(id: number, device: NativeWgpuDevice, texture: number, opaque: boolean): Promise<boolean>
+  canvasPresentation(): string
+  /** Acquire the Linux compositor device after the window has painted once. */
+  canvasGpuDevice(): NativeWgpuDevice | null
   /** Publish padded RGBA8 or BGRA8 pixels through the binary bridge. */
   presentCanvasFrame(id: number, width: number, height: number, stride: number, pixels: Uint8Array, bgra: boolean, opaque: boolean): void
   /** Release a source. Repeated destruction is harmless. */
@@ -173,6 +180,38 @@ export declare class GpuiRenderer {
   captureScreenshot(path: string): void
 }
 
+export declare class NativeWgpuAdapter {
+  get info(): any
+  get features(): Array<string>
+  get limits(): any
+  requestDevice(descriptor: any): Promise<NativeWgpuDevice>
+}
+
+export declare class NativeWgpuDevice {
+  get features(): Array<string>
+  get limits(): any
+  get loss(): any | null
+  takeErrors(): Array<string>
+  create(kind: string, descriptor: any): number
+  compilationInfo(id: number): Promise<any>
+  createPipelineAsync(kind: string, descriptor: any): Promise<unknown>
+  encode(descriptor: any): number
+  submit(handles: Array<number>): void
+  writeBuffer(handle: number, offset: number, data: Uint8Array): void
+  writeTexture(destination: any, data: Uint8Array, layout: any, size: any): void
+  map(handle: number, mode: number, offset: number, size: number): Promise<void>
+  mappedBytes(handle: number, offset: number, size: number): Uint8Array
+  writeMapped(handle: number, offset: number, data: Uint8Array): void
+  unmap(handle: number): void
+  submittedWorkDone(): Promise<void>
+  release(handle: number): void
+  destroyResource(handle: number): void
+  destroy(): void
+  /** Process-wide canvas snapshots, including producer/compositor leases. */
+  get canvasSnapshotBytes(): number
+  get resourceCount(): number
+}
+
 /**
  * GPU-backed GPUI test renderer. Uses `VisualTestAppContext` with the native
  * Metal or DirectX renderer and `TestDispatcher` for deterministic scheduling.
@@ -211,6 +250,10 @@ export declare class TestGpuiRenderer {
   /** Get a custom prop value from an element. */
   getCustomProp(id: number, key: string): string | null
   createCanvasSource(): number
+  /** Reset published images and invalidate outstanding GPU publications. */
+  resetCanvasSource(id: number): void
+  /** GPU snapshot presentation; rejects unsupported platforms and foreign devices. */
+  presentCanvasTexture(id: number, device: NativeWgpuDevice, texture: number, opaque: boolean): Promise<boolean>
   presentCanvasFrame(id: number, width: number, height: number, stride: number, pixels: Uint8Array, bgra: boolean, opaque: boolean): void
   destroyCanvasSource(id: number): void
   /**
@@ -564,6 +607,8 @@ export interface HighlightRect {
   width: number
   height: number
 }
+
+export declare function requestWgpuAdapter(options: any): Promise<NativeWgpuAdapter>
 
 export interface TimelineState {
   currentTimeMs: number

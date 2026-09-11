@@ -18,7 +18,7 @@ try {
     [1920, 1080],
     [3840, 2160],
   ] as const) {
-    const canvas = createGPUCanvas({ renderer, width, height })
+    const canvas = createGPUCanvas({ presentation: "async-readback", renderer, width, height })
     try {
       canvas.configure({ device, format: "bgra8unorm", alphaMode: "opaque" })
       const encoder = device.createCommandEncoder()

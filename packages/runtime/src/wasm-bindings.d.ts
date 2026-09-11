@@ -3,6 +3,12 @@ declare module "@gpui-native/wasm" {
 
   export class WebGpuiRenderer {
     constructor()
+    canvasPresentation(): "shared-wgpu"
+    canvasGpuDevice(): GPUDevice | undefined
+    createCanvasTexture(descriptor: string): { texture: GPUTexture; handle: number }
+    releaseCanvasTexture(handle: number): void
+    resetCanvasSource(id: number): void
+    presentCanvasTexture(id: number, handle: number, opaque: boolean): Promise<boolean>
     createCanvasSource(): number
     presentCanvasFrame(
       id: number,

@@ -118,6 +118,19 @@ export class TestRenderer extends MutationRenderer implements NativeRenderer {
       throw new Error("Rebuild the native test renderer for GPU canvas support")
     return this.#native.createCanvasSource()
   }
+  resetCanvasSource(id: number): void {
+    this.#native.resetCanvasSource?.(id)
+  }
+  presentCanvasTexture(
+    id: number,
+    device: unknown,
+    texture: number,
+    opaque: boolean,
+  ): Promise<boolean> {
+    if (!this.#native.presentCanvasTexture)
+      throw new Error("Rebuild the native test renderer for direct GPU presentation")
+    return this.#native.presentCanvasTexture(id, device, texture, opaque)
+  }
   presentCanvasFrame(
     id: number,
     width: number,

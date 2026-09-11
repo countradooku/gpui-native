@@ -8,12 +8,12 @@ export * from "@gpui-native/runtime/webgpu"
 export function useGPUCanvas(options: Omit<GPUCanvasOptions, "renderer"> = {}): GPUCanvas | null {
   const renderer = useGpuiRequired()
   const [canvas, setCanvas] = useState<GPUCanvas | null>(null)
-  const { width = 300, height = 150, maxFramesInFlight = 2 } = options
+  const { width = 300, height = 150, maxFramesInFlight = 2, presentation = "direct" } = options
   useEffect(() => {
-    const next = createGPUCanvas({ renderer, maxFramesInFlight })
+    const next = createGPUCanvas({ renderer, maxFramesInFlight, presentation })
     setCanvas(next)
     return () => next.destroy()
-  }, [renderer, maxFramesInFlight])
+  }, [renderer, maxFramesInFlight, presentation])
   useEffect(() => {
     if (canvas && !canvas.destroyed) canvas.resize(width, height)
   }, [canvas, width, height])

@@ -18,3 +18,7 @@ pedantic = { level = "warn", priority = -1 }
 many_single_char_names = "allow"
 unreadable_literal = "allow"
 unnested_or_patterns = "allow"
+
+# Two WebGPU object accessors on the exact GPUI-compatible wgpu release.
+[patch.crates-io]
+wgpu = { git = "https://github.com/countradooku/wgpu.git", rev = "8e8be4fd0cba753427625979bc0dab8acdbc440a" }

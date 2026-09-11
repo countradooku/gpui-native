@@ -19,6 +19,9 @@ pub struct GpuiRenderer {
     pub(super) tree: Arc<Mutex<RetainedTree>>,
     pub(super) initialized: Arc<Mutex<bool>>,
     pub(super) headless: Mutex<bool>,
+    /// Worker completions only mark dirty; `AppKit` is touched by the host tick.
+    #[cfg(target_os = "macos")]
+    pending_gpu_repaint: std::sync::atomic::AtomicBool,
     pub(super) window_size: Mutex<WindowSize>,
     /// Shared with the view so timeline controls avoid a UI-thread round trip.
     clock: crate::automation::AutomationClock,
@@ -51,6 +54,8 @@ impl GpuiRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             headless: Mutex::new(false),
+            #[cfg(target_os = "macos")]
+            pending_gpu_repaint: std::sync::atomic::AtomicBool::new(false),
             window_size: Mutex::new(WindowSize {
                 width: 800.0,
                 height: 600.0,
@@ -74,6 +79,100 @@ impl GpuiRenderer {
             .lock()
             .create()
             .map_err(Error::from_reason)
+    }
+
+    /// Reset published images and invalidate outstanding GPU publications.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn reset_canvas_source(&self, id: u32) -> Result<()> {
+        self.tree
+            .lock()
+            .canvas_frames
+            .lock()
+            .reset(id)
+            .map_err(Error::from_reason)
+    }
+
+    /// GPU snapshot presentation; rejects unsupported platforms and foreign devices.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub async fn present_canvas_texture(
+        &self,
+        id: u32,
+        device: &crate::gpu_binding::NativeWgpuDevice,
+        texture: u32,
+        opaque: bool,
+    ) -> Result<bool> {
+        if cfg!(target_os = "windows") {
+            return Err(Error::from_reason(
+                "DirectX shared texture presentation is not implemented; select async-readback explicitly",
+            ));
+        }
+        let frames = self.tree.lock().canvas_frames.clone();
+        let source = {
+            let frames = frames.lock();
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            if frames
+                .shared_gpu
+                .as_ref()
+                .is_none_or(|engine| !Arc::ptr_eq(&engine.device, &device.engine.device))
+            {
+                return Err(Error::from_reason(
+                    "Linux direct presentation requires this window's shared GPU device",
+                ));
+            }
+            frames
+                .direct
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| Error::from_reason("Unknown or destroyed canvas source"))?
+        };
+        let texture = device.engine.texture(texture).map_err(Error::from_reason)?;
+        let presented = source
+            .present(&device.engine, texture, opaque)
+            .await
+            .map_err(Error::from_reason)?;
+        if presented && *self.initialized.lock() {
+            #[cfg(target_os = "macos")]
+            self.pending_gpu_repaint
+                .store(true, std::sync::atomic::Ordering::Release);
+            #[cfg(not(target_os = "macos"))]
+            self.request_invalidate()?;
+        }
+        Ok(presented)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn canvas_presentation(&self) -> String {
+        if cfg!(target_os = "macos") {
+            "metal"
+        } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+            "shared-wgpu"
+        } else {
+            "unsupported"
+        }
+        .into()
+    }
+
+    /// Acquire the Linux compositor device after the window has painted once.
+    #[cfg(not(target_family = "wasm"))]
+    #[napi]
+    pub fn canvas_gpu_device(&self) -> Option<crate::gpu_binding::NativeWgpuDevice> {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            self.tree
+                .lock()
+                .canvas_frames
+                .lock()
+                .shared_gpu
+                .clone()
+                .map(crate::gpu_binding::NativeWgpuDevice::new)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        {
+            None
+        }
     }
 
     /// Publish padded RGBA8 or BGRA8 pixels through the binary bridge.
@@ -583,6 +682,12 @@ impl GpuiRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            if self
+                .pending_gpu_repaint
+                .swap(false, std::sync::atomic::Ordering::AcqRel)
+            {
+                self.request_invalidate()?;
+            }
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()

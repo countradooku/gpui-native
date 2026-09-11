@@ -30,7 +30,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:webgpu": "node --import tsx test/native-webgpu.mts",
-    "bench:webgpu": "node --import tsx test/bench-webgpu.mts"
+    "bench:webgpu": "node --import tsx test/bench-webgpu.mts",
+    "test:wgpu": "node --import tsx test/native-wgpu-lifecycle.mts && node --import tsx test/native-webgpu-window.mts",
+    "bench:wgpu": "node --import tsx test/bench-wgpu.mts"
   },
   "dependencies": {
     "@gpui-native/core": "workspace:^",
@@ -46,9 +48,7 @@
     "three": "0.185.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
-  },
-  "optionalDependencies": {
+    "vitest": "^4.0.0",
     "webgpu": "0.6.0"
   }
 }
