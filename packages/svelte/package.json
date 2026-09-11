@@ -1,0 +1,57 @@
+{
+  "name": "@gpui-native/svelte",
+  "version": "0.1.0",
+  "description": "Svelte 5 runes adapter for the GPUI native and WebAssembly renderer",
+  "homepage": "https://github.com/countradooku/gpui-native#readme",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/countradooku/gpui-native.git",
+    "directory": "packages/svelte"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "bun run ../../scripts/build-svelte.mts",
+    "typecheck": "tsc --noEmit && svelte-check --workspace . --fail-on-warnings",
+    "test": "vitest run",
+    "bench": "bun test/bench.mts",
+    "format": "prettier --plugin prettier-plugin-svelte --write \"src/**/*.svelte\" \"../../examples/svelte-*/src/*.svelte\"",
+    "format:check": "prettier --plugin prettier-plugin-svelte --check \"src/**/*.svelte\" \"../../examples/svelte-*/src/*.svelte\""
+  },
+  "dependencies": {
+    "@gpui-native/runtime": "workspace:^",
+    "magic-string": "^0.30.21",
+    "svelte": "5.57.0",
+    "typescript": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "esbuild": "0.28.2",
+    "prettier": "3.9.6",
+    "prettier-plugin-svelte": "4.1.1",
+    "svelte-check": "4.7.6",
+    "svelte2tsx": "^0.7.45",
+    "vitest": "^4.0.0"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  }
+}

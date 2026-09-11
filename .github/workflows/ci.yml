@@ -66,7 +66,7 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
-      - name: Build Vue and React examples with Vite and Oxc
+      - name: Build Vue, React, and Svelte examples with Vite and Oxc
         run: bun --filter '@gpui-*/example-*' build
 
       - name: Check WebAssembly renderer
@@ -260,7 +260,7 @@ jobs:
 
       - name: Verify tag matches package versions
         run: |
-          for pkg in packages/vue packages/react packages/runtime packages/core; do
+          for pkg in packages/vue packages/react packages/svelte packages/runtime packages/core; do
             version=$(bun -e "console.log(require('./$pkg/package.json').version)")
             if [ "v$version" != "$GITHUB_REF_NAME" ]; then
               echo "Tag $GITHUB_REF_NAME does not match $pkg version $version"
@@ -292,6 +292,12 @@ jobs:
 
       - name: Publish @gpui-native/react
         working-directory: packages/react
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @gpui-native/svelte
+        working-directory: packages/svelte
         run: bun publish --access public
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

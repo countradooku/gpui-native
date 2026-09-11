@@ -38,15 +38,18 @@ Use React 19.2 with `react-reconciler` 0.33 (pinned by the adapter). Configure:
 
 ```tsx
 import { useState } from "react"
-import { render, GpuiDiv, GpuiInput } from "@gpui-native/react"
+import { render, Button, Column, Text, TextInput } from "@gpui-native/react"
 
 function App() {
   const [name, setName] = useState("world")
   return (
-    <GpuiDiv style={{ padding: 24, flexDirection: "column", gap: 12 }}>
-      <text>Hello, {name}</text>
-      <GpuiInput value={name} onChange={(event) => setName(event.value ?? "")} />
-    </GpuiDiv>
+    <Column style={{ padding: 24, gap: 12 }}>
+      <Text>Hello, {name}</Text>
+      <TextInput value={name} onChange={(event) => setName(event.value ?? "")} />
+      <Button onPress={() => setName("world")} style={{ padding: 10 }}>
+        Reset
+      </Button>
+    </Column>
   )
 }
 
@@ -55,7 +58,9 @@ render(<App />, { title: "React + GPUI", width: 720, height: 500 })
 
 Supported intrinsic tags are `div`, `text`, `img`, `svg`, `canvas`, `input`,
 `textarea`, `anchored`, `code`, `diff`, `markdown`, and `virtual-list`. Each also
-has a typed `Gpui*` component. Styles and events are GPUI's types, not DOM CSS
+has a typed component with a [short, framework-neutral name](components.md).
+`Row`, `Column`, `ScrollView`, and the unstyled `Button` build on these primitives.
+Use `onPress` for button activation by pointer, Enter, or Space. Styles and events are GPUI's types, not DOM CSS
 or synthetic browser events. Inputs use `value` and `onChange`; there is no Vue
 `v-model`. Native `<code>` remains bare: the application supplies its container
 styling and language header.
@@ -79,7 +84,7 @@ atomic `applyBatch` protocol. `createGpuiRenderer` provides a low-level root wit
 | `useWindowSize`, `useWindowInsets`      | Same names, return values directly                                     |
 | `useGpuiWindow`                         | Same native window, selection, scrolling and debug controls            |
 | `useGpuiTimeline`, `useGpuiAudioFrames` | Same controls, memoized per renderer                                   |
-| `motion.div`, `stagger`                 | Same declarative native motion                                         |
+| `motion.View`, `stagger`                | Same declarative native motion                                         |
 | `useTextSearch`                         | Same search behavior; spread `search.props` directly                   |
 | Tooltip / Select / Combobox parts       | React components, controlled or uncontrolled state                     |
 | Default slots                           | `children`; item state and filtered lists also accept render functions |

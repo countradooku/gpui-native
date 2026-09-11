@@ -55,3 +55,19 @@ responsibility of the embedding native audio backend.
 See [the React guide](../docs/react.md). `react-counter`, `react-showcase`, and
 `react-multiple-windows` each support `build`, `start`, and `build:binary`.
 They also run in the Pages gallery with the shared GPUI Web backend.
+
+## Svelte examples
+
+See [the Svelte guide](../docs/svelte.md). These use the native Svelte compiler
+and Svelte 5 runes, with strict `svelte-check` validation:
+
+| Example                   | Demonstrates                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `svelte-counter`          | Rune state/derived values, bound native editor and Button                     |
+| `svelte-showcase`         | Select, Combobox, Tooltip, motion, rich text, search, canvas and virtual rows |
+| `svelte-multiple-windows` | Independent component roots and window cleanup                                |
+| `svelte-webgpu`           | Reactive GPU-canvas ownership and a shared WebGPU scene                       |
+
+Run `bun --filter @gpui-svelte/example-counter build` followed by
+`bun --filter @gpui-svelte/example-counter start`. Substitute any name above.
+All four also support `build:binary` and the Pages browser gallery.

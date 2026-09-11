@@ -1,4 +1,4 @@
-import { GpuiCanvas, useGPUCanvas } from "@gpui-native/react"
+import { Canvas, useGPUCanvas } from "@gpui-native/react"
 import { useEffect, useState } from "react"
 
 import { startThreeScene } from "../../shared/three-scene.js"
@@ -34,12 +34,10 @@ function Canvases({ gpu, width }: { gpu: GPU; width: number }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <text>Compute + WGSL · 4× MSAA</text>
       {compute && (
-        <GpuiCanvas source={compute.id} testId="webgpu-canvas" style={{ width, height: 300 }} />
+        <Canvas source={compute.id} testId="webgpu-canvas" style={{ width, height: 300 }} />
       )}
       <text>Textured Three.js · depth + 4× MSAA</text>
-      {three && (
-        <GpuiCanvas source={three.id} testId="three-canvas" style={{ width, height: 300 }} />
-      )}
+      {three && <Canvas source={three.id} testId="three-canvas" style={{ width, height: 300 }} />}
       {error && <text style={{ color: "#ff8888" }}>{error}</text>}
     </div>
   )

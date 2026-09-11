@@ -13,3 +13,6 @@ dist/
 coverage/
 packages/core/index.js
 .DS_Store
+
+# Compiled Svelte test fixtures
+packages/svelte/test/.compiled/

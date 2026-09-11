@@ -1,7 +1,6 @@
 # Framework adapter architecture
 
-GPUI Native is the shared engine. Vue 3 and React 19.2 have independent adapters.
-Svelte and other adapters can use the same framework-neutral TypeScript runtime.
+GPUI Native is the shared engine. Vue 3, React 19.2, and Svelte 5 have independent adapters using the same framework-neutral TypeScript runtime.
 
 ## Ownership
 
@@ -12,7 +11,8 @@ Svelte and other adapters can use the same framework-neutral TypeScript runtime.
 | `packages/vue` (`@gpui-native/vue`)   | Vue reconciliation, components, refs, composables, and Vue-facing renderer helpers                                                      |
 | `packages/runtime`                    | Shared backend wrappers, props, batching, events, automation and GPU test renderer                                                      |
 | `packages/react`                      | React reconciliation, JSX, hooks, components and testing                                                                                |
-| `examples`                            | Vue and React examples                                                                                                                  |
+| `packages/svelte`                     | Svelte runes, native compiler, isolated structural host, components and testing                                                         |
+| `examples`                            | Vue, React and Svelte examples                                                                                                          |
 | `web`                                 | Browser example gallery and generated Wasm bridge                                                                                       |
 
 The dependency direction is framework adapter → core → GPUI. The core must
@@ -39,7 +39,7 @@ COOP/COEP headers.
 wrappers, batching, events, automation, text matching and GPU test renderer.
 Vue re-exports moved APIs for compatibility; its VNodes, refs and composables
 remain in `packages/vue`. React owns its reconciler and hooks in `packages/react`.
-Both adapters claim exclusive ownership of a native renderer and share its ID
+All adapters claim exclusive ownership of a native renderer and share its ID
 allocator. React materializes only committed trees, so speculative work cannot
 leak native elements or event handlers.
 
@@ -76,7 +76,7 @@ the supported test-renderer platforms.
 The shared Rust `gpu` engine owns wgpu resources, command encoding and validated
 submission. `gpu_binding` exposes Node-API operations to Bun and Node;
 `renderer/wasm` exposes the compositor's existing browser device/texture objects.
-React and Vue share `GPUCanvas` lifecycle and presentation in `packages/runtime`.
+React, Vue and Svelte share `GPUCanvas` lifecycle and presentation in `packages/runtime`.
 No framework state enters the Rust GPU engine or `packages/core`.
 
 Direct presentation publishes bounded immutable GPU snapshots with producer and
@@ -84,3 +84,15 @@ compositor completion leases. It never sends presentation pixels through JSON,
 N-API byte arrays or the CPU image atlas. Explicit `async-readback` retains the
 older fallback. See [the GPU canvas guide](webgpu.md) for device ownership,
 upstream fork changes, platform qualification, API gaps and performance evidence.
+
+## Svelte host integration
+
+Svelte owns its rune dependency graph, scheduling, keyed blocks and lifecycle.
+The adapter compiles native tags to typed component functions with Svelte's
+`fragments: "tree"` compiler option. An isolated bundle of the pinned official
+client runtime manipulates a private structural node tree. No browser globals
+are replaced; no CSS, layout, input handling or painting is implemented in that
+tree. Dirty values and parents lower to shared node operations and batching.
+Native editors retain GPUI's text/IME behavior while `bind:value` updates Svelte
+state. The compiler and runtime must be upgraded together. See [Svelte](svelte.md)
+for supported syntax and verification.

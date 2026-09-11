@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 
 import { act, useState } from "react"
 
-import { GpuiCode, GpuiCanvas, GpuiMarkdown } from "../src/components.js"
+import { Button, GpuiCode, GpuiCanvas, GpuiMarkdown } from "../src/components.js"
 import { createTestRoot, hasNativeTestRenderer } from "../src/testing.js"
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 if (!hasNativeTestRenderer) {
@@ -24,15 +24,14 @@ function App() {
         color: "#111",
       }}
     >
-      <div
+      <Button
         testId="button"
-        role="button"
         aria-label="Increment React counter"
-        onClick={() => setCount((value) => value + 1)}
+        onPress={() => setCount((value) => value + 1)}
         style={{ width: 200, height: 40 }}
       >
         Count {count}
-      </div>
+      </Button>
       <textarea
         testId="input"
         value={value}
@@ -61,6 +60,13 @@ try {
     "interpolations must share one native text run",
   )
   assert(JSON.stringify(root.renderer.getA11yTree()).includes("Increment React counter"))
+  act(() => root.renderer.nativeSimulateKeyDown(button.id, "enter"))
+  act(() => root.renderer.nativeSimulateKeyDown(button.id, "space"))
+  await root.flush()
+  assert.equal(root.findByTestId("button").text, "Count 2")
+  act(() => root.renderer.nativeSimulateKeyUp(button.id, "space"))
+  await root.flush()
+  assert.equal(root.findByTestId("button").text, "Count 3")
   act(() => root.renderer.nativeSimulateKeystrokes(root.findByTestId("input").id, "end enter"))
   await root.flush()
   assert.equal(root.findByTestId("input").prop("value"), "hello\n")

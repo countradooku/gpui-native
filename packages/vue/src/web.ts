@@ -34,22 +34,8 @@ export {
   type TextSearch,
   type TextSearchOptions,
 } from "./text-search.js"
-export {
-  GpuiAnchored,
-  GpuiCanvas,
-  GpuiCode,
-  GpuiDiff,
-  GpuiDiv,
-  GpuiImage,
-  GpuiInput,
-  GpuiMarkdown,
-  GpuiSvg,
-  GpuiTextElement,
-  GpuiTextarea,
-  GpuiVirtualList,
-  type GpuiInputComponentProps,
-  type GpuiTextareaComponentProps,
-} from "./components.js"
+export * from "./components.js"
+export { Text } from "./components.js"
 export {
   FloatingLayer,
   floatingRootStyle,
@@ -112,7 +98,14 @@ export {
   type ComboboxTriggerProps,
   type ComboboxValueProps,
 } from "./combobox.js"
-export { motion, MotionDiv, stagger, type MotionDivProps } from "./motion.js"
+export {
+  motion,
+  MotionView,
+  MotionDiv,
+  stagger,
+  type MotionViewProps,
+  type MotionDivProps,
+} from "./motion.js"
 export { createTimeline, GpuiTimeline } from "./timeline.js"
 export { createAudioFrames, GpuiAudioFrames } from "./audio.js"
 export {

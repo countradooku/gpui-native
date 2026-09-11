@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import {
-  GpuiCode,
-  GpuiDiff,
-  GpuiMarkdown,
-  GpuiTextarea,
-  GpuiVirtualList,
-  MotionDiv,
+  Code,
+  Diff,
+  Markdown,
+  TextArea,
+  VirtualList,
+  MotionView,
   nextTick,
   useElementRef,
   useGpuiWindow,
@@ -254,7 +254,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
 
 <template>
   <div :style="rootStyle">
-    <MotionDiv
+    <MotionView
       :initial="false"
       :animate="{ width: collapsed ? 0 : SIDEBAR_WIDTH + 1 }"
       :transition="{ duration: 0.2, ease: 'easeOut' }"
@@ -443,7 +443,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
           background: colors.sidebarBorder,
         }"
       />
-    </MotionDiv>
+    </MotionView>
 
     <div :style="contentStyle">
       <div
@@ -493,7 +493,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
         </div>
       </div>
 
-      <GpuiVirtualList
+      <VirtualList
         ref="transcriptRef"
         :overdraw="240"
         :estimated-item-height="220"
@@ -525,7 +525,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
                 </text>
               </div>
             </div>
-            <GpuiMarkdown :source="introMarkdown" :theme="chatTheme" />
+            <Markdown :source="introMarkdown" :theme="chatTheme" />
             <div
               :style="{
                 display: 'flex',
@@ -616,7 +616,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
               <div :style="{ height: 1, flexGrow: 1, background: colors.border }" />
             </div>
 
-            <GpuiMarkdown
+            <Markdown
               v-else-if="turn.kind === 'markdown'"
               :source="turn.source"
               :theme="chatTheme"
@@ -648,7 +648,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
                 <ChatIcon :name="turnKind(turn)" :size="12" :color="colors.tertiary" />
                 <text :style="{ fontSize: 12, color: colors.secondary }">{{ turn.language }}</text>
               </div>
-              <GpuiCode
+              <Code
                 :code="turn.source"
                 :language="turn.language"
                 show-line-numbers
@@ -656,7 +656,7 @@ async function sendDraft(event?: EventPayload): Promise<void> {
                 :style="{ padding: 10 }"
               />
             </div>
-            <GpuiDiff
+            <Diff
               v-else-if="turn.kind === 'diff'"
               :patch="turn.patch"
               word-diff
@@ -664,11 +664,11 @@ async function sendDraft(event?: EventPayload): Promise<void> {
             />
           </div>
         </div>
-      </GpuiVirtualList>
+      </VirtualList>
 
       <div :style="composerShellStyle">
         <div :style="composerStyle">
-          <GpuiTextarea
+          <TextArea
             v-model="draft"
             testId="composer"
             placeholder="Do anything..."

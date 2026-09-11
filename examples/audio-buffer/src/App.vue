@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  GpuiCanvas,
+  Canvas,
   useGpuiAudioFrames,
   type AudioBufferState,
   type CanvasCommand,
@@ -130,7 +130,7 @@ function clear(): void {
       calls.
     </div>
 
-    <GpuiCanvas
+    <Canvas
       :commands="commands"
       :style="{ width: 700, height: 190, borderRadius: 12, overflow: 'hidden' }"
     />

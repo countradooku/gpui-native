@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { h } from "@vue/runtime-core"
 
+import { Button } from "../src/components.js"
 import { createTestRoot, hasNativeTestRenderer } from "../src/native-testing.js"
 
 if (!hasNativeTestRenderer) {
@@ -19,14 +20,13 @@ try {
   root.render(
     h("div", { style: { display: "flex", flexDirection: "column", width: 480 } }, [
       h(
-        "div",
+        Button,
         {
-          role: "button",
           "aria-label": "Delete note",
-          onClick: () => clicks++,
+          onPress: () => clicks++,
           style: { width: 100, height: 30 },
         },
-        "Delete",
+        () => "Delete",
       ),
       h("text", {}, ["Hello ", "world"]),
       h("img", { alt: "Missing image", style: { width: 100, height: 30 } }),
@@ -49,6 +49,11 @@ try {
   const bounds = root.renderer.getElementBounds(button.id)!
   root.renderer.nativeSimulateClick(bounds[0]! + 5, bounds[1]! + 5)
   assert.equal(clicks, 1)
+  root.renderer.nativeSimulateKeyDown(button.id, "enter")
+  root.renderer.nativeSimulateKeyDown(button.id, "space")
+  assert.equal(clicks, 2, "Space must wait for release")
+  root.renderer.nativeSimulateKeyUp(button.id, "space")
+  assert.equal(clicks, 3, "button must activate by Enter and Space")
   const textarea = container.children[3]!
   root.renderer.nativeSimulateKeystrokes(textarea.id, "end enter")
   assert.equal(changed, "hello\n", "textarea Enter should insert a newline")

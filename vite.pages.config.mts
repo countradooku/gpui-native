@@ -3,6 +3,8 @@ import { resolve } from "node:path"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig } from "vite"
 
+import { gpuiSvelte } from "./packages/svelte/dist/vite.js"
+
 const repositoryRoot = import.meta.dirname
 const webRoot = resolve(repositoryRoot, "web")
 const pagesBase = process.env.PAGES_BASE_PATH ?? "/"
@@ -10,9 +12,13 @@ const pagesBase = process.env.PAGES_BASE_PATH ?? "/"
 export default defineConfig({
   root: webRoot,
   base: pagesBase,
-  plugins: [vue()],
+  plugins: [vue(), gpuiSvelte()],
   resolve: {
     alias: [
+      {
+        find: /^@gpui-native\/svelte$/,
+        replacement: resolve(repositoryRoot, "packages/svelte/dist/web.js"),
+      },
       {
         find: /^@gpui-native\/react$/,
         replacement: resolve(repositoryRoot, "packages/react/src/web.ts"),
@@ -36,6 +42,11 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(webRoot, "index.html"),
+        "svelte-counter": resolve(webRoot, "examples/svelte-counter/index.html"),
+        "svelte-showcase": resolve(webRoot, "examples/svelte-showcase/index.html"),
+        "svelte-multiple-windows": resolve(webRoot, "examples/svelte-multiple-windows/index.html"),
+        "svelte-webgpu": resolve(webRoot, "examples/svelte-webgpu/index.html"),
+
         "react-webgpu": resolve(webRoot, "examples/react-webgpu/index.html"),
         webgpu: resolve(webRoot, "examples/webgpu/index.html"),
         "react-counter": resolve(webRoot, "examples/react-counter/index.html"),

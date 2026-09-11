@@ -1,11 +1,11 @@
 import {
-  GpuiDiv,
-  GpuiInput,
-  GpuiCode,
-  GpuiMarkdown,
-  GpuiCanvas,
-  GpuiVirtualList,
-  MotionDiv,
+  View,
+  TextInput,
+  Code,
+  Markdown,
+  Canvas,
+  VirtualList,
+  MotionView,
   Tooltip,
   TooltipTrigger,
   TooltipContent,
@@ -38,7 +38,7 @@ export default function App() {
   const search = useTextSearch({ query })
   const timeline = useGpuiTimeline()
   return (
-    <GpuiDiv
+    <View
       style={{
         width: "100%",
         height: "100%",
@@ -96,13 +96,13 @@ export default function App() {
         </Combobox>
       </div>
       <div style={panel}>
-        <GpuiInput
+        <TextInput
           value={query}
           onChange={(event) => setQuery(event.value ?? "")}
           placeholder="Search text"
         />
         <div {...search.props}>
-          <GpuiMarkdown
+          <Markdown
             source={
               "# Native text\nReact uses the same native selection and search pipeline as Vue."
             }
@@ -110,35 +110,35 @@ export default function App() {
         </div>
         <div onClick={search.next}>Next match ({search.total})</div>
       </div>
-      <GpuiCode
+      <Code
         code={"function App() {\n  return <text>Hello, native world</text>\n}"}
         language="tsx"
         style={panel}
       />
-      <GpuiCanvas
+      <Canvas
         style={{ height: 90 }}
         commands={[
           { type: "rect", x: 0, y: 0, width: 160, height: 70, radius: 12, fill: "#38bdf8" },
           { type: "circle", cx: 210, cy: 35, radius: 30, fill: "#a78bfa" },
         ]}
       />
-      <MotionDiv
+      <MotionView
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1 }}
         style={panel}
       >
         Native motion, with no React updates per frame
-      </MotionDiv>
+      </MotionView>
       <div onClick={() => timeline.pause()}>Pause timeline</div>
       <div onClick={() => timeline.play()}>Resume timeline</div>
-      <GpuiVirtualList estimatedItemHeight={30} style={{ height: 160 }}>
+      <VirtualList estimatedItemHeight={30} style={{ height: 160 }}>
         {Array.from({ length: 100 }, (_, i) => (
           <text key={i} style={{ height: 30 }}>
             Native row {i + 1}
           </text>
         ))}
-      </GpuiVirtualList>
-    </GpuiDiv>
+      </VirtualList>
+    </View>
   )
 }

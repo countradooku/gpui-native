@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import {
-  GpuiCode,
-  GpuiInput,
-  MotionDiv,
-  type EventPayload,
+  Button,
+  Column,
+  Text,
+  Code,
+  TextInput,
+  MotionView,
   type MotionStyle,
   type MotionTransition,
   type StyleDesc,
@@ -89,43 +91,33 @@ const entranceTransition: MotionTransition = {
 function increment(): void {
   count.value += 1
 }
-
-function handleKeyDown(event: EventPayload): void {
-  if (event.key === "enter" || event.key === "space") increment()
-}
 </script>
 
 <template>
-  <div :style="rootStyle">
-    <div :style="{ fontSize: 30, fontWeight: 700 }">gpui-vue</div>
-    <div :style="{ color: palette.muted }">Vue 3 reactivity rendered by Zed GPUI</div>
+  <Column :style="rootStyle">
+    <Text :style="{ fontSize: 30, fontWeight: 700 }">gpui-vue</Text>
+    <Text :style="{ color: palette.muted }">Vue 3 reactivity rendered by Zed GPUI</Text>
 
-    <MotionDiv
+    <MotionView
       :initial="{ opacity: 0, top: 8 }"
       :animate="entrance"
       :transition="entranceTransition"
       :style="cardStyle"
     >
-      <GpuiInput v-model="label" placeholder="Counter label" :style="inputStyle" />
+      <TextInput v-model="label" placeholder="Counter label" :style="inputStyle" />
 
-      <div testId="count" :style="{ fontSize: 48, fontWeight: 700 }">{{ label }}: {{ count }}</div>
-
-      <div
-        testId="increment"
-        :tabIndex="0"
-        :style="buttonStyle"
-        @click="increment"
-        @key-down="handleKeyDown"
+      <Text testId="count" :style="{ fontSize: 48, fontWeight: 700 }"
+        >{{ label }}: {{ count }}</Text
       >
-        Increment
-      </div>
 
-      <GpuiCode
+      <Button testId="increment" :style="buttonStyle" @press="increment"> Increment </Button>
+
+      <Code
         :code="`const count = ${count}`"
         language="typescript"
         :showLineNumbers="false"
         :style="codeStyle"
       />
-    </MotionDiv>
-  </div>
+    </MotionView>
+  </Column>
 </template>
