@@ -1,8 +1,15 @@
-# gpui-vue examples
+# GPUI Native examples
 
-Each example is a small native Vue application written as Vue SFCs with
-`<template>` and `<script setup lang="ts">`. They use no browser DOM and no
-JavaScript render loop.
+The examples cover Vue 3, React 19.2, and Svelte 5, using the same native GPUI
+engine and WebAssembly browser host. Each framework owns its component state;
+GPUI owns layout, input, text, and painting.
+
+See [React examples](#react-examples), [Svelte examples](#svelte-examples), and
+[the GPUI Kit gallery](#gpui-kit-gallery), or start with the Vue apps below.
+
+## Vue examples
+
+These use Vue SFCs with `<template>` and `<script setup lang="ts">`:
 
 | Example            | SFC                                                  | Demonstrates                                                        | Run                                                     |
 | ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------- |
@@ -36,7 +43,7 @@ GitHub Pages publishes the same artifact at
 [countradooku.github.io/gpui-native](https://countradooku.github.io/gpui-native/). The web gallery uses
 GPUI's single-threaded browser platform, so it does not depend on cross-origin-isolation headers.
 
-Each example build runs strict `vue-tsc` template checking and then compiles a
+Each Vue example build runs strict `vue-tsc` template checking and then compiles a
 small Node-compatible ESM bundle through Vite 8's Rolldown/Oxc pipeline and runs
 it with Bun. Vue generates VNodes, while `render()` or `createWindow()` mounts
 them through the GPUI custom renderer.
@@ -71,3 +78,17 @@ and Svelte 5 runes, with strict `svelte-check` validation:
 Run `bun --filter @gpui-svelte/example-counter build` followed by
 `bun --filter @gpui-svelte/example-counter start`. Substitute any name above.
 All four also support `build:binary` and the Pages browser gallery.
+
+## GPUI Kit gallery
+
+The Vue-based `kit` gallery lets you select all 86 exported Kit components,
+inspect props and emitted values, edit bound controls, and switch themes.
+The same components are available through the React and Svelte `/kit` entries.
+
+```bash
+bun --filter @gpui-vue/example-kit build
+bun --filter @gpui-vue/example-kit start
+```
+
+The browser build includes `/examples/kit/`. See [the Kit guide](../docs/gpui-kit.md)
+for framework binding examples, the complete catalog, and API limits.

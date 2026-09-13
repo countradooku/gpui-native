@@ -2,37 +2,67 @@
 
 [![CI](https://github.com/countradooku/gpui-native/actions/workflows/ci.yml/badge.svg)](https://github.com/countradooku/gpui-native/actions/workflows/ci.yml)
 [![GitHub Pages](https://github.com/countradooku/gpui-native/actions/workflows/pages.yml/badge.svg)](https://countradooku.github.io/gpui-native/)
-[![npm](https://img.shields.io/npm/v/@gpui-native/vue)](https://www.npmjs.com/package/@gpui-native/vue)
+[![Vue on npm](https://img.shields.io/npm/v/@gpui-native/vue?label=Vue)](https://www.npmjs.com/package/@gpui-native/vue)
+[![React on npm](https://img.shields.io/npm/v/@gpui-native/react?label=React)](https://www.npmjs.com/package/@gpui-native/react)
+[![Svelte on npm](https://img.shields.io/npm/v/@gpui-native/svelte?label=Svelte)](https://www.npmjs.com/package/@gpui-native/svelte)
 
-A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3, React 19.2, and Svelte 5 have dedicated adapters with native and browser support.
+A UI engine for **Vue 3, React 19.2, and Svelte 5**, built on [Zed's GPUI](https://gpui.rs/). Write components using your framework's state and reconciliation model; a shared Rust engine handles layout, input, text, painting, and windows on desktop and in the browser through WebAssembly.
+
+[Live examples](https://countradooku.github.io/gpui-native/) · [Vue quick start](#vue-quick-start) · [React guide](docs/react.md) · [Svelte guide](docs/svelte.md) · [GPUI Kit catalog](docs/gpui-kit.md)
+
+## What you can build with
+
+| Capability          | Shared by Vue, React, and Svelte                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Native UI           | Typed layout, input, images, SVG, focus, keyboard/pointer events, and accessibility props                                 |
+| GPUI Kit            | 86 styled native components, including editors, virtualized tables, menus, dialogs, charts, dock panels, and settings     |
+| Rich text           | Selectable/searchable text, syntax-highlighted code, Markdown, diff viewers, and virtual lists                            |
+| Graphics and motion | Retained canvas drawing, native keyframes and springs, a controllable animation timeline, and WebGPU/Three.js integration |
+| Application windows | Independent roots, window controls, size/inset updates, selection, scrolling, and debug overlays                          |
+| Testing             | Framework test roots, retained-tree assertions, automation, and GPU layout/input/screenshot tests on supported hosts      |
+
+Each framework has its own adapter: Vue uses a custom renderer, React uses its reconciler, and Svelte uses a native compiler with runes. They share the same mutation protocol and Rust components. See [the architecture](docs/architecture.md).
 
 ## GPUI Kit
 
 [GPUI Kit](https://github.com/longbridge/gpui-kit) is integrated into the shared native engine, with 86 typed components for Vue, React and Svelte. Import them from `@gpui-native/<framework>/kit`. Native controls, editors, tables, menus, overlays, charts, docking and settings share the same desktop and browser implementation.
 
-See [the Kit guide and complete catalog](docs/gpui-kit.md), or run the [Kit gallery](examples/kit/src/App.vue).
+The `/kit` entry points provide styled Kit components; the main package entry points retain the existing primitives and headless controls. Kit inputs support Vue `v-model`, React controlled callbacks, and Svelte `bind:value`.
+
+See [the Kit guide and complete catalog](docs/gpui-kit.md), including API limits, or run the [Kit gallery](examples/kit/src/App.vue). This integration is included in this checkout; the existing `0.2.0` npm release predates the `/kit` entry points.
 
 ## Status
 
 GPUI Native is an early `0.2.x` release. Native rendering runs on Apple Silicon
 macOS, x64 Linux (Wayland/X11), and x64 Windows, with a WebAssembly renderer
-backing the browser examples. Every commit passes the full quality gate —
-formatting, Oxlint, TypeScript, `vue-tsc`, clippy with warnings denied, and the
-JavaScript and Rust test suites — plus a native build and headless smoke test
-on all three platforms. The live WebAssembly example gallery deploys to
+backing the browser examples. CI runs formatting, lint, framework type checks,
+clippy with warnings denied, JavaScript and Rust tests, native builds, and
+headless addon smoke tests. GPU-backed layout/input/screenshot tests run on
+macOS and Windows; Linux's production binding does not expose that test renderer.
+
+| Host                    | Native/browser renderer     | GPU screenshot test renderer |
+| ----------------------- | --------------------------- | ---------------------------- |
+| macOS, Apple Silicon    | Native GPUI                 | Available                    |
+| Linux, x64, Wayland/X11 | Native GPUI with wgpu       | Not exposed                  |
+| Windows, x64            | Native GPUI                 | Available                    |
+| Browser                 | Single-threaded WebAssembly | Desktop test API not exposed |
+
+The live WebAssembly example gallery deploys to
 [countradooku.github.io/gpui-native](https://countradooku.github.io/gpui-native/) on
 every push to `main`.
 
 The published npm packages live under the `@gpui-native` org:
 
-| npm package                                                            | Contents                                                          |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`@gpui-native/vue`](https://www.npmjs.com/package/@gpui-native/vue)   | The Vue 3 renderer, components, composables, and testing APIs     |
-| [`@gpui-native/core`](https://www.npmjs.com/package/@gpui-native/core) | Prebuilt N-API binaries for macOS (arm64), Linux x64, Windows x64 |
-| [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                   | Alias of `@gpui-native/vue` kept for the shorter name             |
+| npm package                                                                  | Contents                                                             |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [`@gpui-native/vue`](https://www.npmjs.com/package/@gpui-native/vue)         | The Vue 3 renderer, components, composables, and testing APIs        |
+| [`@gpui-native/react`](https://www.npmjs.com/package/@gpui-native/react)     | React 19.2 reconciliation, JSX, components, hooks, and testing       |
+| [`@gpui-native/svelte`](https://www.npmjs.com/package/@gpui-native/svelte)   | Svelte 5 native compiler, runes, components, bindings, and testing   |
+| [`@gpui-native/runtime`](https://www.npmjs.com/package/@gpui-native/runtime) | Shared TypeScript batching, events, backend wrappers, and automation |
+| [`@gpui-native/core`](https://www.npmjs.com/package/@gpui-native/core)       | Prebuilt N-API binaries for macOS (arm64), Linux x64, Windows x64    |
+| [`gpui-vue`](https://www.npmjs.com/package/gpui-vue)                         | Alias of `@gpui-native/vue` kept for the shorter name                |
 
-The 0.2.0 release also publishes `@gpui-native/runtime`, `@gpui-native/react`,
-and `@gpui-native/svelte`. All five scoped packages and the `gpui-vue` alias
+All five scoped packages and the `gpui-vue` alias
 use the same release version. See [the full 0.2.0 release notes](docs/releases/v0.2.0.md).
 
 The [`@gpui-native`](https://www.npmjs.com/org/gpui-native) org is the home
@@ -44,11 +74,18 @@ The upstream baseline and subsequent ports are tracked in [the GPUix synchroniza
 
 ## Install
 
+Choose the adapter for your application:
+
 ```bash
-bun add @gpui-native/vue   # or: npm install @gpui-native/vue
+bun add @gpui-native/vue vue
+# or
+bun add @gpui-native/react react
+# or
+bun add @gpui-native/svelte
 ```
 
-`@gpui-native/vue` depends on `@gpui-native/core`, which ships prebuilt N-API binaries
+You can use `npm install` instead of `bun add`. All adapters use the shared
+`@gpui-native/core` addon, which ships prebuilt N-API binaries
 for the three supported targets. On other platforms, build the addon from
 source with `bun --filter @gpui-native/core build` (see [Build](#build)).
 
@@ -57,7 +94,6 @@ The engine and framework adapters have separate ownership:
 - `crates/gpui-core` — retained tree, native GPUI renderer, window lifecycle, styles, events, text selection, motion, themes, automation, and native elements.
 - `packages/vue` — `@vue/runtime-core` renderer, typed Vue components, composables, headless controls, and testing APIs. Published as `@gpui-native/vue` (alias: `gpui-vue`).
 - `packages/core` — framework-neutral N-API addon loader, generated ABI types, and prebuilt platform binaries. Published as `@gpui-native/core`.
-
 - `packages/react` — React reconciliation, typed JSX, hooks, headless controls, and testing APIs. See [React support and examples](docs/react.md).
 - `packages/svelte` — Svelte 5 runes, native compilation, typed components, headless controls, and testing. See [Svelte support](docs/svelte.md).
 - `packages/runtime` — shared TypeScript backend wrappers, native props, batching, events, automation, and GPU testing.
@@ -66,16 +102,37 @@ Future adapters consume the shared runtime rather than depending on another fram
 [the adapter architecture](docs/architecture.md) for the boundary and extension path.
 
 ```text
-Vue components
-    ↓ @vue/runtime-core custom renderer
-NodeOps + patchProp
-    ↓ one batched mutation protocol
+Vue custom renderer    React reconciler    Svelte native compiler
+         \                    |                    /
+          +---- shared TypeScript runtime --------+
+                              ↓ applyBatch
 Rust RetainedTree + native element registry
     ↓ GPUI layout, input, text, paint, and events
-Native GPUI window
+Desktop GPUI window or single-threaded WebAssembly host
 ```
 
 ## React quick start
+
+```tsx
+import { useState } from "react"
+import { render, Button, Column, Text } from "@gpui-native/react"
+
+function App() {
+  const [count, setCount] = useState(0)
+  return (
+    <Column style={{ padding: 24, gap: 12 }}>
+      <Text>Count: {count}</Text>
+      <Button onPress={() => setCount((value) => value + 1)} style={{ padding: 12 }}>
+        Increment
+      </Button>
+    </Column>
+  )
+}
+
+render(<App />, { title: "React + GPUI", width: 800, height: 600 })
+```
+
+Set TypeScript's `jsx` to `react-jsx` and `jsxImportSource` to `@gpui-native/react`.
 
 See [the React guide](docs/react.md) for JSX configuration, native and browser setup,
 component parity, testing, and three runnable examples. In a checkout:
@@ -88,6 +145,29 @@ bun --filter @gpui-react/example-counter start
 
 ## Svelte quick start
 
+```svelte
+<!-- App.svelte -->
+<script lang="ts">
+  import { Button, Column, Text } from "@gpui-native/svelte"
+  let count = $state(0)
+</script>
+
+<Column style={{ padding: 24, gap: 12 }}>
+  <Text>Count: {count}</Text>
+  <Button onPress={() => count++} style={{ padding: 12 }}>Increment</Button>
+</Column>
+```
+
+```ts
+// main.ts
+import { render } from "@gpui-native/svelte"
+import App from "./App.svelte"
+
+render(App, { title: "Svelte + GPUI", width: 800, height: 600 })
+```
+
+Compile with `gpuiSvelte` from `@gpui-native/svelte/vite` so components target GPUI.
+
 See [the Svelte guide](docs/svelte.md) for runes, native/browser compiler setup,
 bindings, snippets, controls, testing, and four runnable examples. In a checkout:
 
@@ -97,7 +177,7 @@ bun --filter @gpui-svelte/example-counter build
 bun --filter @gpui-svelte/example-counter start
 ```
 
-## Quick start
+## Vue quick start
 
 Write ordinary Vue single-file components — `<template>`, `<script setup>`,
 `v-model`, `v-if`/`v-for`, and event handlers all work — and they render into
@@ -136,8 +216,8 @@ render(App, { title: "My Vue app", width: 800, height: 600 })
 ```
 
 Single-file components compile through the standard `@vitejs/plugin-vue`
-pipeline (see `vite.examples.config.mts` for a working config), and every
-example under [`examples/`](./examples) is written this way. Render functions
+pipeline (see `vite.examples.config.mts` for a working config). The Vue
+examples under [`examples/`](./examples) use this setup. Render functions
 and JSX work equally well — anywhere you would write `h("div", ...)` in a
 browser app, the same call renders a native element.
 
@@ -189,9 +269,9 @@ See [component names and migration](docs/components.md) for the complete API.
 
 All host tags remain directly usable with `h("code", props)` or templates/JSX. The named components provide discoverable TypeScript props; input components additionally translate Vue `v-model` to native `value`/`change` semantics.
 
-## Higher-level Vue controls
+## Headless controls
 
-The Vue package includes headless, shadcn-shaped controls rendered entirely through GPUI host nodes:
+All three adapters include headless controls rendered through GPUI host nodes:
 
 - `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, groups, labels, separators, and scroll buttons.
 - `Combobox`, `ComboboxInput`, `ComboboxTrigger`, `ComboboxValue`, filtered/scoped lists, items, empty state, groups, labels, and separators.
@@ -199,12 +279,16 @@ The Vue package includes headless, shadcn-shaped controls rendered entirely thro
 - `FloatingLayer` for reusable anchored content.
 - `motion.View` and `MotionView` for native tweens, offset keyframes, physical springs, repeats, and staggered entrances.
 
-Select and Combobox support ordinary `v-model`/`modelValue`; named `value`
+In Vue, Select and Combobox support ordinary `v-model`/`modelValue`; named `value`
 models remain available for compatibility. Open state uses `v-model:open`.
 Select also supports buffered `textValue` typeahead and keeps the active option
-in view.
+in view. React uses controlled props and callbacks; Svelte supports bindings.
+See the [React](docs/react.md) and [Svelte](docs/svelte.md) guides for each framework's APIs.
 
-## NodeOps mapping
+## Shared mutation protocol
+
+Vue's renderer, React commits, and Svelte host operations all feed the shared
+runtime. The Vue operation names below illustrate how host mutations reach GPUI:
 
 | Vue renderer operation          | Native behavior                                                                   |
 | ------------------------------- | --------------------------------------------------------------------------------- |
@@ -219,7 +303,7 @@ in view.
 | `patchProp(custom)`             | Sends typed native-element props to the Rust factory registry                     |
 | `parentNode` / `nextSibling`    | Serves Vue keyed diffing, fragments, and component moves from local host links    |
 
-Vue patch waves are coalesced into one `applyBatch()` N-API call. Rust decodes
+Framework mutation waves are coalesced into `applyBatch()` calls. Rust decodes
 the tuples into typed operations before touching the tree, so a malformed batch
 applies nothing. Equal style payloads share one retained allocation and unused
 styles are swept after commits. The tree is updated under one lock and GPUI is
@@ -227,7 +311,13 @@ invalidated once per commit.
 Frames take a structurally shared immutable snapshot and release that lock
 before GPUI layout, input wiring, and paint construction.
 
-## Composables
+## Window APIs, hooks, and runes
+
+All adapters expose window, timeline, audio-buffer and text-search controls.
+Vue uses composables, React uses hooks, and Svelte exposes reactive values through
+its rune-aware runtime. The following names describe the Vue APIs; the
+[React API mapping](docs/react.md#vue-capability-mapping) and
+[Svelte guide](docs/svelte.md) explain the corresponding return values and lifecycle.
 
 - `useGpuiRequired()` returns the current renderer.
 - `useGpuiWindow()` exposes size/insets, title, focus, blur, selection, highlights, scrolling, and debug-overlay controls.
@@ -240,7 +330,7 @@ before GPUI layout, input wiring, and paint construction.
 
 ## Native drawing and playback
 
-Canvas commands are retained and tessellated in Rust. Vue sends geometry only
+Canvas commands are retained and tessellated in Rust. The framework sends geometry only
 when the `commands` prop changes; paint frames do not execute JavaScript:
 
 ```ts
@@ -296,13 +386,15 @@ audio.enqueue(decodedInterleavedFloat32Chunk)
 ```
 
 Use `createWindow()` for independently mounted roots. Each returned window has
-its own Vue app, retained tree, event scope, timeline, and lifecycle; `close()`
+its own framework root, retained tree, event scope, timeline, and lifecycle; `close()`
 does not affect other windows. `render()` remains the persistent single-window
 hot-remount API.
 
 ## Testing and automation
 
-`mountGpui()` runs the exact Vue renderer against a deterministic in-memory retained tree:
+Each adapter provides framework testing APIs over the shared retained runtime.
+For example, Vue's `mountGpui()` runs its renderer against a deterministic
+in-memory retained tree:
 
 ```ts
 const app = mountGpui(MyComponent)
@@ -317,7 +409,7 @@ For native automation, `GpuiAutomation` exposes normalized tree snapshots, test-
 `createTestRoot({ width, height })` sizes the GPU-backed offscreen window for
 layout and wrapping tests; its native default remains 1280×800.
 
-The `gpui-vue/automation` export also provides the parity Playwright-style API: `App`, `Locator`, `connectTest()`, `connectStdio()`, `launch()`, the typed versioned request catalog, SSE codecs, and `enableAutomation()` for serving a live renderer over stdin/stdout. macOS and Windows test-support builds include GPUI's GPU-backed `TestGpuiRenderer`; use `hasNativeTestRenderer` and `createTestRoot()` for real layout, hit-testing, keyboard input, selection, scrolling, painted-text, clock, and screenshot tests.
+The shared `@gpui-native/runtime/automation` entry provides `App`, `Locator`, `connectTest()`, `connectStdio()`, `launch()`, the typed versioned request catalog, SSE codecs, and `enableAutomation()` for serving a live renderer over stdin/stdout. The Vue automation entry and `gpui-vue/automation` alias remain available. macOS and Windows test-support builds include GPUI's GPU-backed `TestGpuiRenderer`; check `hasNativeTestRenderer` before using GPU-backed test roots. Linux still runs addon load and headless retained-tree checks.
 
 Locators support clicks, auxiliary buttons, hover, wheel input, text entry, held
 modifier keys, and stepped drag gestures. Live desktop and WebAssembly renderers
@@ -385,7 +477,7 @@ platform, generates its `wasm-bindgen` browser bridge, and creates the example g
 The Pages workflow supplies the deployment base path from GitHub's Pages configuration.
 For a local build with the same URL prefix, run `PAGES_BASE_PATH=/gpui-native/ bun run build:pages`.
 
-Applications importing `gpui-vue/web` must alias the virtual
+Browser applications use their adapter's `/web` entry and must alias the virtual
 `@gpui-native/wasm` module to their generated `wasm-bindgen` JavaScript file. For
 Vite, the essential configuration is:
 
@@ -402,7 +494,7 @@ fancy-regex engine. Both targets therefore retain the same syntax definitions
 and visual highlighting. Multiple native windows are represented by independent
 canvases in the browser example.
 
-CI runs formatting, clippy with warnings denied, Oxc, Vue, TypeScript, and Rust
+CI runs formatting, clippy with warnings denied, Oxc, TypeScript, Vue and Svelte component checks, and Rust
 checks plus one native target per OS:
 Apple Silicon macOS, x64 Linux, and x64 Windows. Pushing a version tag such as
 `v0.2.0` creates a GitHub Release containing those bindings and publishes
@@ -430,7 +522,7 @@ The native engine pins the Zed/GPUI revision whose embedded-window, selectable-t
 
 ## Attribution
 
-The full native component engine is adapted from GPUix's Apache-2.0 native package. Some upstream native subsystems derive from MIT-licensed Comet. Source details and license texts are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md), [`LICENSES/Apache-2.0.txt`](./LICENSES/Apache-2.0.txt), and [`LICENSES/Comet-MIT.txt`](./LICENSES/Comet-MIT.txt). The Vue renderer, component API, state model, composables, automation client/protocol implementation, and examples are gpui-vue code.
+The native component engine is adapted from GPUix's Apache-2.0 native package. Some upstream native subsystems derive from MIT-licensed Comet. Source details and license texts are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md), [`LICENSES/Apache-2.0.txt`](./LICENSES/Apache-2.0.txt), and [`LICENSES/Comet-MIT.txt`](./LICENSES/Comet-MIT.txt). GPUI Native provides the framework adapters and shared host integration. GPUI Kit is vendored under Apache-2.0 with its source pin, licenses, and embedding patches recorded in [`vendor/gpui-kit/UPSTREAM.md`](vendor/gpui-kit/UPSTREAM.md).
 
 ### WebGPU canvas
 

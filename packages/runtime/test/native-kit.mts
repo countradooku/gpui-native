@@ -12,6 +12,18 @@ const { TestGpuiRenderer } = createRequire(import.meta.url)(
   "@gpui-native/core",
 ) as typeof import("@gpui-native/core")
 
+assert.deepEqual(
+  Object.keys(cases).sort(),
+  Object.values(KIT_COMPONENTS).sort(),
+  "Every exported Kit component needs a native rendering case",
+)
+
+// Linux production bindings intentionally omit GPUI's GPU-backed test renderer.
+if (typeof TestGpuiRenderer !== "function") {
+  console.log("Kit GPU smoke skipped: native test renderer is unavailable")
+  process.exit(0)
+}
+
 const renderer = new TestGpuiRenderer(420, 280)
 renderer.applyBatch(
   JSON.stringify([
@@ -88,11 +100,6 @@ assert.equal(
 )
 console.log("Kit native control activation and removed-prop reset passed")
 
-assert.deepEqual(
-  Object.keys(cases).sort(),
-  Object.values(KIT_COMPONENTS).sort(),
-  "Every exported Kit component needs a native rendering case",
-)
 for (const [tag, props] of Object.entries(cases)) {
   console.log(`Rendering ${tag}`)
   renderer.applyBatch(
