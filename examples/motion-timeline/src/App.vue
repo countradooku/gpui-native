@@ -2,6 +2,7 @@
 import {
   MotionView,
   stagger,
+  useWindowSize,
   useGpuiTimeline,
   type EventPayload,
   type MotionKeyframe,
@@ -31,11 +32,13 @@ const rootStyle: StyleDesc = {
   padding: 28,
   background: colors.background,
   color: colors.text,
+  overflow: "scroll",
 }
 
 const panelStyle: StyleDesc = {
   display: "flex",
   flexDirection: "column",
+  flexShrink: 0,
   gap: 11,
   padding: 20,
   borderRadius: 14,
@@ -50,6 +53,7 @@ const cardStyle: StyleDesc = {
   alignItems: "center",
   gap: 12,
   height: 52,
+  flexShrink: 0,
   paddingLeft: 16,
   paddingRight: 16,
   borderRadius: 10,
@@ -60,6 +64,7 @@ const runnerStyle: StyleDesc = {
   position: "relative",
   width: 34,
   height: 10,
+  flexShrink: 0,
   borderRadius: 5,
   background: colors.blue,
 }
@@ -83,11 +88,13 @@ const cards = [
   ["Zero JS frame loop", "#c494ff"],
 ] as const
 
-const runnerKeyframes: readonly MotionKeyframe[] = [
+const size = useWindowSize()
+const trackWidth = computed(() => Math.max(1, size.value.width - 56))
+const runnerKeyframes = computed<readonly MotionKeyframe[]>(() => [
   { at: 0, value: { opacity: 0.4, left: 0 } },
-  { at: 0.5, value: { opacity: 1, left: 620 }, ease: "easeInOut" },
+  { at: 0.5, value: { opacity: 1, left: Math.max(0, trackWidth.value - 34) }, ease: "easeInOut" },
   { at: 1, value: { opacity: 0.4, left: 0 }, ease: "easeInOut" },
-]
+])
 
 const runnerTransition: MotionTransition = {
   duration: 2.6,
@@ -112,9 +119,9 @@ const drag = ref<{ id: number; pointerX: number; clipLeft: number } | null>(null
 function clipStyle(clip: (typeof clips.value)[number]): StyleDesc {
   return {
     position: "absolute",
-    left: clip.left,
+    left: clip.left * Math.min(1, trackWidth.value / 700),
     top: 18,
-    width: clip.width,
+    width: clip.width * Math.min(1, trackWidth.value / 700),
     height: 54,
     padding: 12,
     borderRadius: 8,
@@ -138,7 +145,11 @@ function startDrag(clip: (typeof clips.value)[number], event: EventPayload): voi
 
 function moveDrag(clip: (typeof clips.value)[number], event: EventPayload): void {
   if (drag.value?.id !== clip.id) return
-  clip.left = Math.max(0, drag.value.clipLeft + (event.x ?? 0) - drag.value.pointerX)
+  clip.left = Math.max(
+    0,
+    drag.value.clipLeft +
+      ((event.x ?? 0) - drag.value.pointerX) / Math.min(1, trackWidth.value / 700),
+  )
 }
 
 function endDrag(): void {
@@ -199,6 +210,7 @@ function update(next: TimelineState): void {
         position: 'relative',
         width: '100%',
         height: 90,
+        flexShrink: 0,
         overflow: 'hidden',
         borderRadius: 12,
         borderWidth: 1,

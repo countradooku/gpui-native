@@ -33,6 +33,7 @@ async function start(): Promise<void> {
   const reveal = (): boolean => {
     if (document.querySelector("canvas") === null) return false
     loading?.classList.add("hidden")
+    loading?.setAttribute("aria-hidden", "true")
     return true
   }
   if (!reveal()) {

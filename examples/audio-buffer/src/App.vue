@@ -2,6 +2,7 @@
 import {
   Canvas,
   useGpuiAudioFrames,
+  useWindowSize,
   type AudioBufferState,
   type CanvasCommand,
   type StyleDesc,
@@ -33,6 +34,7 @@ const rootStyle: StyleDesc = {
   padding: 28,
   background: colors.background,
   color: colors.text,
+  overflow: "scroll",
 }
 
 const buttonStyle: StyleDesc = {
@@ -47,8 +49,10 @@ const buttonStyle: StyleDesc = {
   active: { opacity: 0.62 },
 }
 
-function waveformCommands(samples: readonly number[]): CanvasCommand[] {
-  const width = 700
+const windowSize = useWindowSize()
+const chartWidth = computed(() => Math.max(1, Math.min(700, windowSize.value.width - 56)))
+
+function waveformCommands(samples: readonly number[], width: number): CanvasCommand[] {
   const height = 190
   const nextCommands: CanvasCommand[] = [
     { type: "rect", x: 0, y: 0, width, height, radius: 12, fill: colors.panel },
@@ -84,7 +88,7 @@ const audio = useGpuiAudioFrames()
 const state = ref(audio.configure(SAMPLE_RATE, CHANNELS, CAPACITY_FRAMES))
 const waveform = ref<number[]>(Array.from({ length: 160 }, () => 0))
 const phase = ref(0)
-const commands = computed(() => waveformCommands(waveform.value))
+const commands = computed(() => waveformCommands(waveform.value, chartWidth.value))
 
 function enqueueTone(): void {
   const interleaved = new Float32Array(CHUNK_FRAMES * CHANNELS)
@@ -132,10 +136,16 @@ function clear(): void {
 
     <Canvas
       :commands="commands"
-      :style="{ width: 700, height: 190, borderRadius: 12, overflow: 'hidden' }"
+      :style="{
+        width: chartWidth,
+        height: 190,
+        flexShrink: 0,
+        borderRadius: 12,
+        overflow: 'hidden',
+      }"
     />
 
-    <div :style="{ display: 'flex', gap: 22 }">
+    <div :style="{ display: 'flex', flexWrap: 'wrap', flexShrink: 0, gap: 22 }">
       <div>
         <div :style="{ color: colors.muted }">Queue</div>
         <div :style="{ color: colors.green, fontWeight: 700 }">{{ stateText(state) }}</div>

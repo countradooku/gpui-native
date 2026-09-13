@@ -44,9 +44,16 @@ canvas {
   touch-action: none;
 }
 
-body[data-example="multiple-windows"] canvas {
-  width: 50% !important;
-  flex-basis: 50%;
+@media (max-width: 720px) {
+  body[data-example$="multiple-windows"] {
+    flex-direction: column;
+  }
+
+  body[data-example$="multiple-windows"] canvas {
+    width: 100% !important;
+    height: 0 !important;
+    flex: 1 1 0;
+  }
 }
 
 #loading {

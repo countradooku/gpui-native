@@ -122,7 +122,10 @@ const venueLoad = ref(
 
 const rootStyle: StyleDesc = {
   width: "100%",
+  minWidth: 1240,
   height: "100%",
+  minHeight: 760,
+  flexShrink: 0,
   display: "flex",
   flexDirection: "column",
   background: colors.canvas,
@@ -619,535 +622,543 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :style="rootStyle">
-    <div :style="headerStyle">
-      <div :style="{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }">
-        <div
-          :style="{
-            width: 30,
-            height: 30,
-            borderRadius: 7,
-            background: colors.cyanDim,
-            borderWidth: 1,
-            borderColor: '#28606a',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.cyan,
-            fontWeight: 800,
-            fontSize: 14,
-          }"
-        >
-          V
-        </div>
-        <div :style="{ display: 'flex', flexDirection: 'column', gap: 2 }">
-          <text :style="{ fontSize: 12, fontWeight: 750, color: colors.text }">VECTOR GRID</text>
-          <text :style="{ fontSize: 9, color: colors.muted }">MARKET FABRIC / PERFORMANCE LAB</text>
-        </div>
-      </div>
-
-      <div :style="{ width: 1, height: 26, background: colors.border }" />
-
-      <TextInput
-        v-model="query"
-        testId="market-search"
-        placeholder="Search 100,000 symbols, companies, venues…"
-        :style="{
-          width: 340,
-          height: 34,
-          borderRadius: 6,
-          borderWidth: 1,
-          borderColor: colors.borderBright,
-          background: colors.raised,
-          color: colors.text,
-          fontSize: 11,
-          paddingLeft: 12,
-          paddingRight: 12,
-        }"
-      />
-
-      <div :style="{ flexGrow: 1 }" />
-      <div :style="{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }">
-        <text :style="{ fontSize: 9, color: colors.muted }">SESSION</text>
-        <text :style="{ fontSize: 11, color: colors.text }">{{ formatUptime() }}</text>
-      </div>
-      <div
-        :style="{
-          height: 29,
-          paddingLeft: 11,
-          paddingRight: 11,
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 7,
-          borderRadius: 5,
-          background: running ? colors.limeDim : colors.redDim,
-          color: running ? colors.lime : colors.red,
-          cursor: 'pointer',
-          fontSize: 10,
-          fontWeight: 750,
-          hover: { opacity: 0.8 },
-        }"
-        testId="stream-toggle"
-        @click="toggleRunning"
-      >
-        <div
-          :style="{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            background: running ? colors.lime : colors.red,
-          }"
-        />
-        {{ running ? "STREAMING" : "PAUSED" }}
-      </div>
-    </div>
-
-    <div :style="{ display: 'flex', flexDirection: 'row', flexGrow: 1, minHeight: 0 }">
-      <div
-        :style="{
-          width: 62,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 7,
-          paddingTop: 14,
-          paddingBottom: 12,
-          borderRightWidth: 1,
-          borderColor: colors.border,
-          background: '#090d12',
-          userSelect: 'none',
-        }"
-      >
-        <div
-          v-for="sector in ['ALL', ...sectors]"
-          :key="sector"
-          :style="sectorButtonStyle(sector)"
-          :testId="`sector-${sector.toLocaleLowerCase()}`"
-          @click="selectSector(sector)"
-        >
-          {{ sector === "ALL" ? "ALL" : sector.slice(0, 2).toLocaleUpperCase() }}
-        </div>
-        <div :style="{ flexGrow: 1 }" />
-        <div
-          :style="{
-            width: 38,
-            height: 38,
-            borderRadius: 7,
-            borderWidth: 1,
-            borderColor: colors.border,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.muted,
-            cursor: 'pointer',
-            hover: { background: colors.raisedStrong, color: colors.text },
-          }"
-          @click="resetIndex"
-        >
-          ↻
-        </div>
-      </div>
-
-      <div
-        :style="{
-          flexGrow: 1,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          padding: 11,
-        }"
-      >
-        <div :style="{ height: 83, flexShrink: 0, display: 'flex', flexDirection: 'row', gap: 10 }">
+  <div :style="{ width: '100%', height: '100%', overflow: 'scroll', background: colors.canvas }">
+    <div :style="rootStyle">
+      <div :style="headerStyle">
+        <div :style="{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }">
           <div
-            v-for="stat in statCards"
-            :key="stat.label"
             :style="{
-              flexGrow: 1,
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 5,
-              padding: 12,
-              borderRadius: 8,
+              width: 30,
+              height: 30,
+              borderRadius: 7,
+              background: colors.cyanDim,
               borderWidth: 1,
-              borderColor: colors.border,
-              background: colors.panel,
+              borderColor: '#28606a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: colors.cyan,
+              fontWeight: 800,
+              fontSize: 14,
             }"
           >
-            <div :style="{ display: 'flex', alignItems: 'center', gap: 6 }">
-              <div :style="{ width: 5, height: 5, borderRadius: 3, background: stat.color }" />
-              <text :style="{ fontSize: 9, color: colors.muted, fontWeight: 650 }">{{
-                stat.label
-              }}</text>
-            </div>
-            <text :style="{ fontSize: 20, fontWeight: 720, color: colors.text }">{{
-              stat.value
-            }}</text>
-            <text :style="{ fontSize: 9, color: colors.faint }">{{ stat.detail }}</text>
+            V
+          </div>
+          <div :style="{ display: 'flex', flexDirection: 'column', gap: 2 }">
+            <text :style="{ fontSize: 12, fontWeight: 750, color: colors.text }">VECTOR GRID</text>
+            <text :style="{ fontSize: 9, color: colors.muted }"
+              >MARKET FABRIC / PERFORMANCE LAB</text
+            >
+          </div>
+        </div>
+
+        <div :style="{ width: 1, height: 26, background: colors.border }" />
+
+        <TextInput
+          v-model="query"
+          testId="market-search"
+          placeholder="Search 100,000 symbols, companies, venues…"
+          :style="{
+            width: 340,
+            height: 34,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: colors.borderBright,
+            background: colors.raised,
+            color: colors.text,
+            fontSize: 11,
+            paddingLeft: 12,
+            paddingRight: 12,
+          }"
+        />
+
+        <div :style="{ flexGrow: 1 }" />
+        <div :style="{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }">
+          <text :style="{ fontSize: 9, color: colors.muted }">SESSION</text>
+          <text :style="{ fontSize: 11, color: colors.text }">{{ formatUptime() }}</text>
+        </div>
+        <div
+          :style="{
+            height: 29,
+            paddingLeft: 11,
+            paddingRight: 11,
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 7,
+            borderRadius: 5,
+            background: running ? colors.limeDim : colors.redDim,
+            color: running ? colors.lime : colors.red,
+            cursor: 'pointer',
+            fontSize: 10,
+            fontWeight: 750,
+            hover: { opacity: 0.8 },
+          }"
+          testId="stream-toggle"
+          @click="toggleRunning"
+        >
+          <div
+            :style="{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              background: running ? colors.lime : colors.red,
+            }"
+          />
+          {{ running ? "STREAMING" : "PAUSED" }}
+        </div>
+      </div>
+
+      <div :style="{ display: 'flex', flexDirection: 'row', flexGrow: 1, minHeight: 0 }">
+        <div
+          :style="{
+            width: 62,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 7,
+            paddingTop: 14,
+            paddingBottom: 12,
+            borderRightWidth: 1,
+            borderColor: colors.border,
+            background: '#090d12',
+            userSelect: 'none',
+          }"
+        >
+          <div
+            v-for="sector in ['ALL', ...sectors]"
+            :key="sector"
+            :style="sectorButtonStyle(sector)"
+            :testId="`sector-${sector.toLocaleLowerCase()}`"
+            @click="selectSector(sector)"
+          >
+            {{ sector === "ALL" ? "ALL" : sector.slice(0, 2).toLocaleUpperCase() }}
+          </div>
+          <div :style="{ flexGrow: 1 }" />
+          <div
+            :style="{
+              width: 38,
+              height: 38,
+              borderRadius: 7,
+              borderWidth: 1,
+              borderColor: colors.border,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: colors.muted,
+              cursor: 'pointer',
+              hover: { background: colors.raisedStrong, color: colors.text },
+            }"
+            @click="resetIndex"
+          >
+            ↻
           </div>
         </div>
 
         <div
           :style="{
             flexGrow: 1,
+            minWidth: 0,
             minHeight: 0,
             display: 'flex',
-            flexDirection: 'row',
+            flexDirection: 'column',
             gap: 10,
+            padding: 11,
           }"
         >
-          <div :style="{ ...panelStyle, flexGrow: 1, minWidth: 0 }">
+          <div
+            :style="{ height: 83, flexShrink: 0, display: 'flex', flexDirection: 'row', gap: 10 }"
+          >
             <div
+              v-for="stat in statCards"
+              :key="stat.label"
               :style="{
-                height: 47,
-                flexShrink: 0,
-                paddingLeft: 12,
-                paddingRight: 12,
+                flexGrow: 1,
+                minWidth: 0,
                 display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-                borderBottomWidth: 1,
+                flexDirection: 'column',
+                gap: 5,
+                padding: 12,
+                borderRadius: 8,
+                borderWidth: 1,
                 borderColor: colors.border,
-                background: '#0d131a',
-                userSelect: 'none',
+                background: colors.panel,
               }"
             >
-              <div :style="{ display: 'flex', flexDirection: 'column', gap: 2 }">
-                <text :style="{ fontSize: 11, fontWeight: 700 }">LIVE INSTRUMENT MATRIX</text>
-                <text :style="{ fontSize: 9, color: colors.muted }">
-                  {{ formatInteger(filteredCount) }} rows · visible
-                  {{ formatInteger(visibleStart + 1) }}–{{ formatInteger(visibleEnd) }}
-                </text>
-              </div>
-              <div :style="{ flexGrow: 1 }" />
-              <text :style="{ fontSize: 9, color: colors.muted }">LOAD</text>
-              <div :style="rateButtonStyle(1_000)" @click="targetRate = 1_000">1K/s</div>
-              <div :style="rateButtonStyle(5_000)" @click="targetRate = 5_000">5K/s</div>
-              <div :style="rateButtonStyle(20_000)" @click="targetRate = 20_000">20K/s</div>
-            </div>
-
-            <div
-              :style="{
-                height: 30,
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingLeft: 12,
-                paddingRight: 12,
-                borderBottomWidth: 1,
-                borderColor: colors.border,
-                background: '#0a0f15',
-                fontSize: 9,
-                fontWeight: 650,
-                userSelect: 'none',
-              }"
-            >
-              <text
-                :style="headerCellStyle('symbol', 142, 'left', true)"
-                @click="setSort('symbol')"
-              >
-                SYMBOL{{ sortMark("symbol") }}
-              </text>
-              <text :style="headerCellStyle(null, 78)">SECTOR</text>
-              <text :style="headerCellStyle(null, 52)">VENUE</text>
-              <text :style="headerCellStyle('price', 76, 'right')" @click="setSort('price')">
-                LAST{{ sortMark("price") }}
-              </text>
-              <text :style="headerCellStyle('change', 68, 'right')" @click="setSort('change')">
-                CHANGE{{ sortMark("change") }}
-              </text>
-              <text :style="headerCellStyle(null, 76, 'right')">BID</text>
-              <text :style="headerCellStyle(null, 76, 'right')">ASK</text>
-              <text :style="headerCellStyle('volume', 76, 'right')" @click="setSort('volume')">
-                VOLUME{{ sortMark("volume") }}
-              </text>
-              <text :style="headerCellStyle(null, 66, 'right')">TRADES</text>
-              <text :style="headerCellStyle('latency', 70, 'right')" @click="setSort('latency')">
-                LATENCY{{ sortMark("latency") }}
-              </text>
-              <text :style="columnStyle(68, 'right')">STATE</text>
-            </div>
-
-            <VirtualList
-              ref="tableRef"
-              :item-count="filteredCount"
-              :window-start="windowStart"
-              :estimated-item-height="34"
-              :overdraw="136"
-              :style="tableStyle"
-              testId="market-table"
-              @visible-range="handleVisibleRange"
-            >
-              <div
-                v-for="item in windowRows"
-                :key="`${item.row.id}-${item.logicalIndex}`"
-                :style="rowStyle(item.row, item.logicalIndex)"
-              >
-                <div :style="columnStyle(142, 'left', true)">
-                  <text :style="{ color: colors.text, fontWeight: 680 }">{{
-                    item.row.symbol
-                  }}</text>
-                  <text :style="{ color: colors.faint, marginLeft: 7 }">{{
-                    item.row.company
-                  }}</text>
-                </div>
-                <text :style="{ ...columnStyle(78), color: colors.muted }">{{
-                  item.row.sector
+              <div :style="{ display: 'flex', alignItems: 'center', gap: 6 }">
+                <div :style="{ width: 5, height: 5, borderRadius: 3, background: stat.color }" />
+                <text :style="{ fontSize: 9, color: colors.muted, fontWeight: 650 }">{{
+                  stat.label
                 }}</text>
-                <text :style="{ ...columnStyle(52), color: colors.faint }">{{
-                  item.row.venue
-                }}</text>
-                <text :style="{ ...columnStyle(76, 'right'), color: colors.text }">
-                  {{ formatPrice(item.row.price) }}
-                </text>
-                <text
-                  :style="{
-                    ...columnStyle(68, 'right'),
-                    color: changeColor(item.row.change),
-                    fontWeight: 650,
-                  }"
-                >
-                  {{ formatChange(item.row.change) }}
-                </text>
-                <text :style="{ ...columnStyle(76, 'right'), color: colors.muted }">
-                  {{ formatPrice(item.row.bid) }}
-                </text>
-                <text :style="{ ...columnStyle(76, 'right'), color: colors.muted }">
-                  {{ formatPrice(item.row.ask) }}
-                </text>
-                <text :style="{ ...columnStyle(76, 'right'), color: colors.text }">
-                  {{ formatCompact(item.row.volume) }}
-                </text>
-                <text :style="{ ...columnStyle(66, 'right'), color: colors.muted }">
-                  {{ formatCompact(item.row.trades) }}
-                </text>
-                <text
-                  :style="{
-                    ...columnStyle(70, 'right'),
-                    color: item.row.latency > 7.8 ? colors.red : colors.muted,
-                  }"
-                >
-                  {{ item.row.latency.toFixed(2) }} ms
-                </text>
-                <div
-                  :style="{
-                    ...columnStyle(68, 'right'),
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                  }"
-                >
-                  <div :style="healthStyle(item.row.health)">{{ item.row.health }}</div>
-                </div>
               </div>
-            </VirtualList>
-
-            <div
-              :style="{
-                height: 29,
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingLeft: 12,
-                paddingRight: 12,
-                gap: 14,
-                borderTopWidth: 1,
-                borderColor: colors.border,
-                background: '#0a0f15',
-                fontSize: 9,
-                color: colors.faint,
-              }"
-            >
-              <text>NATIVE VIRTUAL WINDOW</text>
-              <text :style="{ color: colors.cyan }">{{ formatInteger(mountedCount) }} mounted</text>
-              <text
-                >{{ formatInteger(Math.max(0, filteredCount - mountedCount)) }} retained as logical
-                rows</text
-              >
-              <div :style="{ flexGrow: 1 }" />
-              <text>dataset generated in {{ generationMs.toFixed(1) }} ms</text>
+              <text :style="{ fontSize: 20, fontWeight: 720, color: colors.text }">{{
+                stat.value
+              }}</text>
+              <text :style="{ fontSize: 9, color: colors.faint }">{{ stat.detail }}</text>
             </div>
           </div>
 
           <div
             :style="{
-              width: 326,
-              flexShrink: 0,
+              flexGrow: 1,
               minHeight: 0,
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'row',
               gap: 10,
             }"
           >
-            <div :style="{ ...panelStyle, height: 251, flexShrink: 0 }">
+            <div :style="{ ...panelStyle, flexGrow: 1, minWidth: 0 }">
               <div
                 :style="{
-                  height: 42,
+                  height: 47,
                   flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  paddingLeft: 11,
-                  paddingRight: 11,
-                  borderBottomWidth: 1,
-                  borderColor: colors.border,
-                }"
-              >
-                <text :style="{ fontSize: 10, fontWeight: 700 }">CROSS-SECTOR FLOW</text>
-                <div :style="{ flexGrow: 1 }" />
-                <text :style="{ fontSize: 9, color: colors.lime }">● LIVE</text>
-              </div>
-              <Canvas :commands="chartCommands" :style="{ width: 308, height: 154, margin: 8 }" />
-              <div
-                :style="{
+                  paddingLeft: 12,
+                  paddingRight: 12,
                   display: 'flex',
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 10,
-                  paddingLeft: 10,
-                  paddingRight: 10,
-                  fontSize: 8,
-                  color: colors.muted,
-                }"
-              >
-                <div
-                  v-for="series in chartSeries"
-                  :key="series.name"
-                  :style="{ display: 'flex', alignItems: 'center', gap: 3 }"
-                >
-                  <div :style="{ width: 8, height: 2, background: series.color }" />
-                  <text>{{ series.name.slice(0, 3).toLocaleUpperCase() }}</text>
-                </div>
-              </div>
-            </div>
-
-            <div :style="{ ...panelStyle, flexGrow: 1, minHeight: 195 }">
-              <div
-                :style="{
-                  height: 40,
-                  flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  paddingLeft: 11,
-                  paddingRight: 11,
                   borderBottomWidth: 1,
                   borderColor: colors.border,
+                  background: '#0d131a',
+                  userSelect: 'none',
                 }"
               >
-                <text :style="{ fontSize: 10, fontWeight: 700 }">VENUE SATURATION</text>
+                <div :style="{ display: 'flex', flexDirection: 'column', gap: 2 }">
+                  <text :style="{ fontSize: 11, fontWeight: 700 }">LIVE INSTRUMENT MATRIX</text>
+                  <text :style="{ fontSize: 9, color: colors.muted }">
+                    {{ formatInteger(filteredCount) }} rows · visible
+                    {{ formatInteger(visibleStart + 1) }}–{{ formatInteger(visibleEnd) }}
+                  </text>
+                </div>
                 <div :style="{ flexGrow: 1 }" />
-                <text :style="{ fontSize: 8, color: colors.muted }">LOAD / RTT</text>
+                <text :style="{ fontSize: 9, color: colors.muted }">LOAD</text>
+                <div :style="rateButtonStyle(1_000)" @click="targetRate = 1_000">1K/s</div>
+                <div :style="rateButtonStyle(5_000)" @click="targetRate = 5_000">5K/s</div>
+                <div :style="rateButtonStyle(20_000)" @click="targetRate = 20_000">20K/s</div>
               </div>
+
               <div
-                v-for="venue in venueLoad"
-                :key="venue.venue"
                 :style="{
-                  height: 31,
+                  height: 30,
                   flexShrink: 0,
                   display: 'flex',
                   flexDirection: 'row',
                   alignItems: 'center',
-                  gap: 8,
-                  paddingLeft: 11,
-                  paddingRight: 11,
+                  paddingLeft: 12,
+                  paddingRight: 12,
                   borderBottomWidth: 1,
-                  borderColor: '#17212b',
+                  borderColor: colors.border,
+                  background: '#0a0f15',
                   fontSize: 9,
+                  fontWeight: 650,
+                  userSelect: 'none',
                 }"
               >
-                <text :style="{ width: 34, color: colors.text, fontWeight: 650 }">{{
-                  venue.venue
-                }}</text>
+                <text
+                  :style="headerCellStyle('symbol', 142, 'left', true)"
+                  @click="setSort('symbol')"
+                >
+                  SYMBOL{{ sortMark("symbol") }}
+                </text>
+                <text :style="headerCellStyle(null, 78)">SECTOR</text>
+                <text :style="headerCellStyle(null, 52)">VENUE</text>
+                <text :style="headerCellStyle('price', 76, 'right')" @click="setSort('price')">
+                  LAST{{ sortMark("price") }}
+                </text>
+                <text :style="headerCellStyle('change', 68, 'right')" @click="setSort('change')">
+                  CHANGE{{ sortMark("change") }}
+                </text>
+                <text :style="headerCellStyle(null, 76, 'right')">BID</text>
+                <text :style="headerCellStyle(null, 76, 'right')">ASK</text>
+                <text :style="headerCellStyle('volume', 76, 'right')" @click="setSort('volume')">
+                  VOLUME{{ sortMark("volume") }}
+                </text>
+                <text :style="headerCellStyle(null, 66, 'right')">TRADES</text>
+                <text :style="headerCellStyle('latency', 70, 'right')" @click="setSort('latency')">
+                  LATENCY{{ sortMark("latency") }}
+                </text>
+                <text :style="columnStyle(68, 'right')">STATE</text>
+              </div>
+
+              <VirtualList
+                ref="tableRef"
+                :item-count="filteredCount"
+                :window-start="windowStart"
+                :estimated-item-height="34"
+                :overdraw="136"
+                :style="tableStyle"
+                testId="market-table"
+                @visible-range="handleVisibleRange"
+              >
+                <div
+                  v-for="item in windowRows"
+                  :key="`${item.row.id}-${item.logicalIndex}`"
+                  :style="rowStyle(item.row, item.logicalIndex)"
+                >
+                  <div :style="columnStyle(142, 'left', true)">
+                    <text :style="{ color: colors.text, fontWeight: 680 }">{{
+                      item.row.symbol
+                    }}</text>
+                    <text :style="{ color: colors.faint, marginLeft: 7 }">{{
+                      item.row.company
+                    }}</text>
+                  </div>
+                  <text :style="{ ...columnStyle(78), color: colors.muted }">{{
+                    item.row.sector
+                  }}</text>
+                  <text :style="{ ...columnStyle(52), color: colors.faint }">{{
+                    item.row.venue
+                  }}</text>
+                  <text :style="{ ...columnStyle(76, 'right'), color: colors.text }">
+                    {{ formatPrice(item.row.price) }}
+                  </text>
+                  <text
+                    :style="{
+                      ...columnStyle(68, 'right'),
+                      color: changeColor(item.row.change),
+                      fontWeight: 650,
+                    }"
+                  >
+                    {{ formatChange(item.row.change) }}
+                  </text>
+                  <text :style="{ ...columnStyle(76, 'right'), color: colors.muted }">
+                    {{ formatPrice(item.row.bid) }}
+                  </text>
+                  <text :style="{ ...columnStyle(76, 'right'), color: colors.muted }">
+                    {{ formatPrice(item.row.ask) }}
+                  </text>
+                  <text :style="{ ...columnStyle(76, 'right'), color: colors.text }">
+                    {{ formatCompact(item.row.volume) }}
+                  </text>
+                  <text :style="{ ...columnStyle(66, 'right'), color: colors.muted }">
+                    {{ formatCompact(item.row.trades) }}
+                  </text>
+                  <text
+                    :style="{
+                      ...columnStyle(70, 'right'),
+                      color: item.row.latency > 7.8 ? colors.red : colors.muted,
+                    }"
+                  >
+                    {{ item.row.latency.toFixed(2) }} ms
+                  </text>
+                  <div
+                    :style="{
+                      ...columnStyle(68, 'right'),
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                    }"
+                  >
+                    <div :style="healthStyle(item.row.health)">{{ item.row.health }}</div>
+                  </div>
+                </div>
+              </VirtualList>
+
+              <div
+                :style="{
+                  height: 29,
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  gap: 14,
+                  borderTopWidth: 1,
+                  borderColor: colors.border,
+                  background: '#0a0f15',
+                  fontSize: 9,
+                  color: colors.faint,
+                }"
+              >
+                <text>NATIVE VIRTUAL WINDOW</text>
+                <text :style="{ color: colors.cyan }"
+                  >{{ formatInteger(mountedCount) }} mounted</text
+                >
+                <text
+                  >{{ formatInteger(Math.max(0, filteredCount - mountedCount)) }} retained as
+                  logical rows</text
+                >
+                <div :style="{ flexGrow: 1 }" />
+                <text>dataset generated in {{ generationMs.toFixed(1) }} ms</text>
+              </div>
+            </div>
+
+            <div
+              :style="{
+                width: 326,
+                flexShrink: 0,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }"
+            >
+              <div :style="{ ...panelStyle, height: 251, flexShrink: 0 }">
                 <div
                   :style="{
-                    position: 'relative',
-                    height: 5,
-                    flexGrow: 1,
-                    borderRadius: 3,
-                    background: '#18222d',
-                    overflow: 'hidden',
+                    height: 42,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: 11,
+                    paddingRight: 11,
+                    borderBottomWidth: 1,
+                    borderColor: colors.border,
+                  }"
+                >
+                  <text :style="{ fontSize: 10, fontWeight: 700 }">CROSS-SECTOR FLOW</text>
+                  <div :style="{ flexGrow: 1 }" />
+                  <text :style="{ fontSize: 9, color: colors.lime }">● LIVE</text>
+                </div>
+                <Canvas :commands="chartCommands" :style="{ width: 308, height: 154, margin: 8 }" />
+                <div
+                  :style="{
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingLeft: 10,
+                    paddingRight: 10,
+                    fontSize: 8,
+                    color: colors.muted,
                   }"
                 >
                   <div
-                    :style="{
-                      height: 5,
-                      width: `${venue.load}%`,
-                      borderRadius: 3,
-                      background: venue.load > 84 ? colors.orange : colors.cyan,
-                    }"
-                  />
+                    v-for="series in chartSeries"
+                    :key="series.name"
+                    :style="{ display: 'flex', alignItems: 'center', gap: 3 }"
+                  >
+                    <div :style="{ width: 8, height: 2, background: series.color }" />
+                    <text>{{ series.name.slice(0, 3).toLocaleUpperCase() }}</text>
+                  </div>
                 </div>
-                <text :style="{ width: 28, textAlign: 'right', color: colors.muted }"
-                  >{{ venue.load }}%</text
-                >
-                <text
-                  :style="{
-                    width: 42,
-                    textAlign: 'right',
-                    color: venue.latency > 6 ? colors.red : colors.faint,
-                  }"
-                >
-                  {{ venue.latency.toFixed(2) }}ms
-                </text>
               </div>
-            </div>
 
-            <div :style="{ ...panelStyle, height: 183, flexShrink: 0 }">
-              <div
-                :style="{
-                  height: 40,
-                  flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  paddingLeft: 11,
-                  paddingRight: 11,
-                  borderBottomWidth: 1,
-                  borderColor: colors.border,
-                }"
-              >
-                <text :style="{ fontSize: 10, fontWeight: 700 }">FABRIC EVENTS</text>
-                <div :style="{ flexGrow: 1 }" />
-                <text :style="{ fontSize: 8, color: colors.muted }">LATEST</text>
-              </div>
-              <div
-                v-for="alert in alerts.slice(0, 4)"
-                :key="alert.id"
-                :style="{
-                  height: 35,
-                  flexShrink: 0,
-                  display: 'flex',
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 7,
-                  paddingLeft: 11,
-                  paddingRight: 11,
-                  borderBottomWidth: 1,
-                  borderColor: '#17212b',
-                  fontSize: 9,
-                }"
-              >
-                <div :style="{ width: 5, height: 5, borderRadius: 3, background: alert.color }" />
-                <text :style="{ width: 48, color: colors.text, fontWeight: 650 }">{{
-                  alert.symbol
-                }}</text>
-                <text
+              <div :style="{ ...panelStyle, flexGrow: 1, minHeight: 195 }">
+                <div
                   :style="{
-                    flexGrow: 1,
-                    minWidth: 0,
-                    color: colors.muted,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    height: 40,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: 11,
+                    paddingRight: 11,
+                    borderBottomWidth: 1,
+                    borderColor: colors.border,
                   }"
                 >
-                  {{ alert.message }}
-                </text>
-                <text :style="{ color: colors.faint }">{{ alert.time }}</text>
+                  <text :style="{ fontSize: 10, fontWeight: 700 }">VENUE SATURATION</text>
+                  <div :style="{ flexGrow: 1 }" />
+                  <text :style="{ fontSize: 8, color: colors.muted }">LOAD / RTT</text>
+                </div>
+                <div
+                  v-for="venue in venueLoad"
+                  :key="venue.venue"
+                  :style="{
+                    height: 31,
+                    flexShrink: 0,
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingLeft: 11,
+                    paddingRight: 11,
+                    borderBottomWidth: 1,
+                    borderColor: '#17212b',
+                    fontSize: 9,
+                  }"
+                >
+                  <text :style="{ width: 34, color: colors.text, fontWeight: 650 }">{{
+                    venue.venue
+                  }}</text>
+                  <div
+                    :style="{
+                      position: 'relative',
+                      height: 5,
+                      flexGrow: 1,
+                      borderRadius: 3,
+                      background: '#18222d',
+                      overflow: 'hidden',
+                    }"
+                  >
+                    <div
+                      :style="{
+                        height: 5,
+                        width: `${venue.load}%`,
+                        borderRadius: 3,
+                        background: venue.load > 84 ? colors.orange : colors.cyan,
+                      }"
+                    />
+                  </div>
+                  <text :style="{ width: 28, textAlign: 'right', color: colors.muted }"
+                    >{{ venue.load }}%</text
+                  >
+                  <text
+                    :style="{
+                      width: 42,
+                      textAlign: 'right',
+                      color: venue.latency > 6 ? colors.red : colors.faint,
+                    }"
+                  >
+                    {{ venue.latency.toFixed(2) }}ms
+                  </text>
+                </div>
+              </div>
+
+              <div :style="{ ...panelStyle, height: 183, flexShrink: 0 }">
+                <div
+                  :style="{
+                    height: 40,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: 11,
+                    paddingRight: 11,
+                    borderBottomWidth: 1,
+                    borderColor: colors.border,
+                  }"
+                >
+                  <text :style="{ fontSize: 10, fontWeight: 700 }">FABRIC EVENTS</text>
+                  <div :style="{ flexGrow: 1 }" />
+                  <text :style="{ fontSize: 8, color: colors.muted }">LATEST</text>
+                </div>
+                <div
+                  v-for="alert in alerts.slice(0, 4)"
+                  :key="alert.id"
+                  :style="{
+                    height: 35,
+                    flexShrink: 0,
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 7,
+                    paddingLeft: 11,
+                    paddingRight: 11,
+                    borderBottomWidth: 1,
+                    borderColor: '#17212b',
+                    fontSize: 9,
+                  }"
+                >
+                  <div :style="{ width: 5, height: 5, borderRadius: 3, background: alert.color }" />
+                  <text :style="{ width: 48, color: colors.text, fontWeight: 650 }">{{
+                    alert.symbol
+                  }}</text>
+                  <text
+                    :style="{
+                      flexGrow: 1,
+                      minWidth: 0,
+                      color: colors.muted,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }"
+                  >
+                    {{ alert.message }}
+                  </text>
+                  <text :style="{ color: colors.faint }">{{ alert.time }}</text>
+                </div>
               </div>
             </div>
           </div>

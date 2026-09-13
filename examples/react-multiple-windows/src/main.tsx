@@ -3,7 +3,15 @@ import { useState } from "react"
 function Inspector() {
   const window = useGpuiWindow()
   return (
-    <div style={{ padding: 24, color: "#fff", backgroundColor: "#172033", height: "100%" }}>
+    <div
+      style={{
+        padding: 24,
+        color: "#fff",
+        backgroundColor: "#172033",
+        height: "100%",
+        overflow: "scroll",
+      }}
+    >
       <text>Independent React root</text>
       <div onClick={() => window.setTitle("Inspector updated")}>Rename this window</div>
     </div>
@@ -21,6 +29,7 @@ function Controller() {
         color: "#fff",
         backgroundColor: "#111827",
         height: "100%",
+        overflow: "scroll",
       }}
     >
       <text style={{ fontSize: 24 }}>React windows</text>

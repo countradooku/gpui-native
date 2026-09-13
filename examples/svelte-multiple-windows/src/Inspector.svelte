@@ -8,6 +8,7 @@
   style={{
     width: "100%",
     height: "100%",
+    overflow: "scroll",
     padding: 24,
     gap: 16,
     background: "#182030",
