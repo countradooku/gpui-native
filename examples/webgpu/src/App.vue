@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { useWindowSize } from "@gpui-native/vue"
+import { computed, ref } from "vue"
 
 import Canvases from "./Canvases.vue"
 defineProps<{ gpu: GPU }>()
 const visible = ref(true)
 const wide = ref(false)
+const size = useWindowSize()
+const canvasWidth = computed(() =>
+  Math.max(1, Math.min(wide.value ? 720 : 480, size.value.width - 48)),
+)
 </script>
 <template>
   <div
     :style="{
       width: '100%',
       height: '100%',
+      overflow: 'scroll',
       padding: 24,
       gap: 12,
       display: 'flex',
@@ -20,7 +26,9 @@ const wide = ref(false)
     }"
   >
     <text :style="{ fontSize: 26 }">Vue · shared GPU canvases</text>
-    <div :style="{ display: 'flex', flexDirection: 'row', gap: 12 }">
+    <div
+      :style="{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 0, gap: 12 }"
+    >
       <div
         role="button"
         :style="{ padding: 10, backgroundColor: '#23304a', borderRadius: 6 }"
@@ -36,6 +44,6 @@ const wide = ref(false)
         Resize canvases
       </div>
     </div>
-    <Canvases v-if="visible" :gpu="gpu" :width="wide ? 720 : 480" />
+    <Canvases v-if="visible" :gpu="gpu" :width="canvasWidth" />
   </div>
 </template>

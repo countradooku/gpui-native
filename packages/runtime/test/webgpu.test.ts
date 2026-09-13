@@ -174,7 +174,7 @@ describe("GPU canvas lifecycle and backpressure", () => {
 })
 
 describe("shared-device direct transport", () => {
-  function directFixture() {
+  function directFixture(maxFramesInFlight = 1) {
     const lost = deferred<GPUDeviceLostInfo>()
     const device = {
       lost: lost.promise,
@@ -185,22 +185,24 @@ describe("shared-device direct transport", () => {
     const reset = vi.fn<(id: number) => void>()
     const release = vi.fn<(id: number) => void>()
     const cpu = vi.fn<() => void>()
+    const textures: GPUTexture[] = []
     const renderer = Object.assign(new MemoryNativeRenderer(), {
       createCanvasSource: () => 19,
       destroyCanvasSource: vi.fn<(id: number) => void>(),
       presentCanvasFrame: cpu,
       canvasPresentation: () => "shared-wgpu" as const,
       canvasGpuDevice: () => device,
-      createCanvasTexture: () => ({
-        texture: { destroy: vi.fn<() => void>() } as unknown as GPUTexture,
-        handle: 4,
-      }),
+      createCanvasTexture: () => {
+        const texture = { destroy: vi.fn<() => void>() } as unknown as GPUTexture
+        textures.push(texture)
+        return { texture, handle: 3 + textures.length }
+      },
       releaseCanvasTexture: release,
       resetCanvasSource: reset,
       presentCanvasTexture: vi.fn<() => Promise<boolean>>(() => pending.promise),
     })
-    const canvas = createGPUCanvas({ renderer, width: 32, height: 32, maxFramesInFlight: 1 })
-    return { canvas, device, pending, reset, release, cpu }
+    const canvas = createGPUCanvas({ renderer, width: 32, height: 32, maxFramesInFlight })
+    return { canvas, device, pending, reset, release, cpu, renderer, textures }
   }
 
   it("rejects unsupported shared capabilities and foreign devices", async () => {
@@ -231,6 +233,8 @@ describe("shared-device direct transport", () => {
     const first = f.canvas.present()
     expect(await f.canvas.present()).toBe(false)
     f.canvas.resize(64, 32)
+    expect(f.textures[0]!.destroy).not.toHaveBeenCalled()
+    expect(f.release).not.toHaveBeenCalled()
     f.pending.resolve(true)
     expect(await first).toBe(false)
     expect(f.release).toHaveBeenCalledWith(4)
@@ -239,4 +243,48 @@ describe("shared-device direct transport", () => {
     expect(f.canvas.stats).toMatchObject({ transport: "gpu-copy", bytesPresented: 0, inFlight: 0 })
     f.canvas.destroy()
   })
+
+  it.each(["resize", "configure", "unconfigure", "destroy"] as const)(
+    "retains a retired target until all presentations settle after %s",
+    async (action) => {
+      const f = directFixture(2)
+      f.canvas.configure({ device: f.device, format: "rgba8unorm" })
+      const first = deferred<boolean>()
+      const second = deferred<boolean>()
+      f.renderer.presentCanvasTexture
+        .mockImplementationOnce(() => first.promise)
+        .mockImplementationOnce(() => second.promise)
+      const a = f.canvas.present()
+      const b = f.canvas.present()
+      const texture = f.textures[0]!
+      if (action === "resize") f.canvas.resize(64, 32)
+      else if (action === "configure")
+        f.canvas.configure({ device: f.device, format: "bgra8unorm" })
+      else f.canvas[action]()
+      expect(texture.destroy).not.toHaveBeenCalled()
+      expect(f.release).not.toHaveBeenCalled()
+
+      // An obsolete presentation may reject while another still needs the target.
+      first.reject(new Error("presentation cancelled"))
+      expect(await a).toBe(false)
+      expect(texture.destroy).not.toHaveBeenCalled()
+      expect(f.release).not.toHaveBeenCalled()
+
+      const replacement = f.canvas.getContext("webgpu").getConfiguration()
+        ? f.canvas.getContext("webgpu").getCurrentTexture()
+        : undefined
+      const destroyReplacement = replacement?.destroy ?? vi.fn<() => void>()
+      second.resolve(true)
+      expect(await b).toBe(false)
+      expect(texture.destroy).toHaveBeenCalledOnce()
+      expect(f.release).toHaveBeenCalledOnce()
+      expect(f.release).toHaveBeenCalledWith(4)
+      expect(destroyReplacement).not.toHaveBeenCalled()
+      expect(f.canvas.stats).toMatchObject({ inFlight: 0, presented: 0, dropped: 2, failed: 0 })
+      f.canvas.destroy()
+      f.canvas.destroy()
+      expect(texture.destroy).toHaveBeenCalledOnce()
+      expect(destroyReplacement).toHaveBeenCalledTimes(replacement ? 1 : 0)
+    },
+  )
 })

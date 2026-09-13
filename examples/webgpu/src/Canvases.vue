@@ -40,11 +40,19 @@ onScopeDispose(() => {
 })
 </script>
 <template>
-  <div :style="{ display: 'flex', flexDirection: 'column', gap: 12 }">
+  <div :style="{ display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }">
     <text>Compute + WGSL · 4× MSAA</text>
-    <Canvas :source="compute.id" testId="webgpu-canvas" :style="{ width, height: 300 }" />
+    <Canvas
+      :source="compute.id"
+      testId="webgpu-canvas"
+      :style="{ width, height: 300, flexShrink: 0 }"
+    />
     <text>Textured Three.js · depth + 4× MSAA</text>
-    <Canvas :source="three.id" testId="three-canvas" :style="{ width, height: 300 }" />
+    <Canvas
+      :source="three.id"
+      testId="three-canvas"
+      :style="{ width, height: 300, flexShrink: 0 }"
+    />
     <text v-if="error" :style="{ color: '#ff8888' }">{{ error }}</text>
   </div>
 </template>

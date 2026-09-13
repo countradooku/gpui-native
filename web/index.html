@@ -46,6 +46,7 @@
 
       aside {
         display: flex;
+        min-width: 0;
         min-height: 0;
         flex-direction: column;
         border-right: 1px solid #253047;
@@ -125,7 +126,8 @@
 
       .toolbar {
         display: flex;
-        height: 48px;
+        min-height: 48px;
+        flex-shrink: 0;
         align-items: center;
         gap: 10px;
         padding: 0 16px;
@@ -136,10 +138,15 @@
       }
 
       .toolbar strong {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: #e8effc;
       }
 
       .toolbar a {
+        flex-shrink: 0;
         margin-left: auto;
       }
 
@@ -154,7 +161,7 @@
       @media (max-width: 720px) {
         main {
           grid-template-rows: auto minmax(0, 1fr);
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
 
         aside {
@@ -170,12 +177,18 @@
         nav {
           flex-direction: row;
           overflow-x: auto;
+          overflow-y: hidden;
           padding: 8px;
         }
 
         button {
           width: auto;
           flex: 0 0 auto;
+        }
+
+        .toolbar {
+          gap: 8px;
+          padding: 0 12px;
         }
       }
     </style>
@@ -228,19 +241,23 @@
       function select(requested) {
         const name = names.has(requested) ? requested : "counter"
         const href = `./examples/${name}/`
-        frame.src = href
+        if (frame.getAttribute("src") !== href) frame.src = href
         current.textContent = name
         open.href = href
         for (const button of buttons) {
           button.setAttribute("aria-current", String(button.dataset.example === name))
         }
         history.replaceState(null, "", `#${name}`)
+        buttons
+          .find((button) => button.dataset.example === name)
+          ?.scrollIntoView({ block: "nearest", inline: "nearest" })
       }
 
       for (const button of buttons) {
         button.addEventListener("click", () => select(button.dataset.example))
       }
       select(location.hash.slice(1))
+      window.addEventListener("hashchange", () => select(location.hash.slice(1)))
     </script>
   </body>
 </html>

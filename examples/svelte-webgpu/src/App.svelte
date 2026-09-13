@@ -1,8 +1,17 @@
 <script lang="ts">
-  import { Canvas, Column, Text, useGPUCanvas } from "@gpui-native/svelte";
+  import {
+    Canvas,
+    Column,
+    Text,
+    useGPUCanvas,
+    useWindowSize,
+  } from "@gpui-native/svelte";
   import { startWebGPUScene } from "../../shared/webgpu-scene.js";
   let { gpu }: { gpu: GPU } = $props();
-  const canvas = useGPUCanvas(() => ({ width: 640, height: 400 }));
+  const size = useWindowSize();
+  const width = $derived(Math.max(1, Math.min(640, size.width - 48)));
+  const height = $derived(Math.round((width * 400) / 640));
+  const canvas = useGPUCanvas(() => ({ width, height }));
   let error = $state("");
   $effect(() => {
     const current = canvas.current;
@@ -34,6 +43,7 @@
   style={{
     width: "100%",
     height: "100%",
+    overflow: "scroll",
     padding: 24,
     gap: 16,
     background: "#111827",
@@ -41,6 +51,6 @@
   }}
   ><Text>Svelte runes + WebGPU</Text>{#if canvas.current}<Canvas
       source={canvas.current.id}
-      style={{ width: 640, height: 400 }}
+      style={{ width, height, flexShrink: 0 }}
     />{/if}{#if error}<Text>{error}</Text>{/if}</Column
 >

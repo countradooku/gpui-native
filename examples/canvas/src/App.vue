@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { Canvas, type CanvasCommand, type EventPayload, type StyleDesc } from "@gpui-native/vue"
+import {
+  Canvas,
+  useWindowSize,
+  type CanvasCommand,
+  type EventPayload,
+  type StyleDesc,
+} from "@gpui-native/vue"
 import { computed, ref } from "vue"
 
 const colors = {
@@ -22,6 +28,7 @@ const rootStyle: StyleDesc = {
   padding: 28,
   background: colors.background,
   color: colors.text,
+  overflow: "scroll",
 }
 
 const buttonStyle: StyleDesc = {
@@ -37,11 +44,12 @@ const buttonStyle: StyleDesc = {
 }
 
 const phase = ref(0)
+const windowSize = useWindowSize()
+const chartWidth = computed(() => Math.max(1, Math.min(720, windowSize.value.width - 56)))
 const dense = ref(false)
 const pointer = ref("Move over the canvas to receive native pointer events")
 
-function chartCommands(currentPhase: number, isDense: boolean): CanvasCommand[] {
-  const width = 720
+function chartCommands(currentPhase: number, isDense: boolean, width: number): CanvasCommand[] {
   const height = 320
   const count = isDense ? 4_000 : 240
   const grid: CanvasCommand[] = []
@@ -106,7 +114,7 @@ function chartCommands(currentPhase: number, isDense: boolean): CanvasCommand[] 
     },
     {
       type: "circle",
-      cx: 610,
+      cx: width * (610 / 720),
       cy: 82,
       radius: 18,
       fill: colors.green,
@@ -116,7 +124,7 @@ function chartCommands(currentPhase: number, isDense: boolean): CanvasCommand[] 
   ]
 }
 
-const commands = computed(() => chartCommands(phase.value, dense.value))
+const commands = computed(() => chartCommands(phase.value, dense.value, chartWidth.value))
 
 function shiftPhase(): void {
   phase.value += Math.PI / 3
@@ -144,16 +152,24 @@ function handleMouseMove(event: EventPayload): void {
 
     <Canvas
       :commands="commands"
-      :style="{ width: 720, height: 320, borderRadius: 12, overflow: 'hidden' }"
+      :style="{
+        width: chartWidth,
+        height: 320,
+        flexShrink: 0,
+        borderRadius: 12,
+        overflow: 'hidden',
+      }"
       @mouse-move="handleMouseMove"
     />
 
-    <div :style="{ display: 'flex', gap: 10, alignItems: 'center' }">
+    <div
+      :style="{ display: 'flex', flexWrap: 'wrap', flexShrink: 0, gap: 10, alignItems: 'center' }"
+    >
       <div :style="buttonStyle" @click="shiftPhase">Shift phase</div>
       <div :style="buttonStyle" @click="toggleDensity">
         {{ dense ? "Use 240 points" : "Use 4,000 points" }}
       </div>
-      <div :style="{ color: colors.muted, marginLeft: 8 }">{{ pointer }}</div>
+      <div :style="{ width: '100%', color: colors.muted }">{{ pointer }}</div>
     </div>
   </div>
 </template>

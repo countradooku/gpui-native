@@ -21,10 +21,13 @@ import {
   ComboboxItem,
   ComboboxEmpty,
   useTextSearch,
+  findRanges,
   useGpuiTimeline,
   type StyleDesc,
 } from "@gpui-native/react"
 import { useState } from "react"
+const searchHeading = "Native text"
+const searchParagraph = "React uses the same native selection and search pipeline as Vue."
 const panel: StyleDesc = {
   padding: 16,
   gap: 10,
@@ -32,10 +35,22 @@ const panel: StyleDesc = {
   backgroundColor: "#1e293b",
   display: "flex",
   flexDirection: "column",
+  flexShrink: 0,
 }
 export default function App() {
   const [query, setQuery] = useState("native")
-  const search = useTextSearch({ query })
+  // Markdown generates its runs in Rust, so supply the count using the shared
+  // matcher and the same two text blocks that make up this document.
+  const search = useTextSearch({
+    query,
+    matches: {
+      total: [searchHeading, searchParagraph].reduce(
+        (total, text) => total + findRanges({ text, query }).length,
+        0,
+      ),
+      indexOffset: 0,
+    },
+  })
   const timeline = useGpuiTimeline()
   return (
     <View
@@ -102,11 +117,7 @@ export default function App() {
           placeholder="Search text"
         />
         <div {...search.props}>
-          <Markdown
-            source={
-              "# Native text\nReact uses the same native selection and search pipeline as Vue."
-            }
-          />
+          <Markdown source={`# ${searchHeading}\n${searchParagraph}`} />
         </div>
         <div onClick={search.next}>Next match ({search.total})</div>
       </div>
@@ -116,7 +127,7 @@ export default function App() {
         style={panel}
       />
       <Canvas
-        style={{ height: 90 }}
+        style={{ height: 90, flexShrink: 0 }}
         commands={[
           { type: "rect", x: 0, y: 0, width: 160, height: 70, radius: 12, fill: "#38bdf8" },
           { type: "circle", cx: 210, cy: 35, radius: 30, fill: "#a78bfa" },
@@ -132,7 +143,7 @@ export default function App() {
       </MotionView>
       <div onClick={() => timeline.pause()}>Pause timeline</div>
       <div onClick={() => timeline.play()}>Resume timeline</div>
-      <VirtualList estimatedItemHeight={30} style={{ height: 160 }}>
+      <VirtualList estimatedItemHeight={30} style={{ height: 160, flexShrink: 0 }}>
         {Array.from({ length: 100 }, (_, i) => (
           <text key={i} style={{ height: 30 }}>
             Native row {i + 1}

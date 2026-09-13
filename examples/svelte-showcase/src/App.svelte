@@ -43,15 +43,13 @@
     color: "#f8fafc",
     overflow: "scroll",
   }}
->
-  <Text style={{ fontSize: 28 }}>Svelte native components</Text>
-  <Row style={{ gap: 16 }}>
-    <Tooltip
+  ><Text style={{ fontSize: 28 }}>Svelte native components</Text><Row
+    style={{ gap: 16, flexWrap: "wrap", flexShrink: 0 }}
+    ><Tooltip
       ><TooltipTrigger style={panel}>Hover or focus</TooltipTrigger
       ><TooltipContent style={panel}>A native GPUI tooltip</TooltipContent
       ></Tooltip
-    >
-    <Select bind:value={language}
+    ><Select bind:value={language}
       ><SelectTrigger style={panel}><SelectValue /></SelectTrigger
       ><SelectContent style={panel}
         ><SelectItem value="typescript" textValue="TypeScript"
@@ -59,52 +57,46 @@
         ><SelectItem value="rust" textValue="Rust">Rust</SelectItem
         ></SelectContent
       ></Select
-    >
-    <Combobox bind:value={fruit}
-      ><ComboboxInput placeholder="Find fruit" style={panel} /><ComboboxContent
-        style={panel}
+    ><Combobox bind:value={fruit}
+      ><ComboboxInput
+        placeholder="Find fruit"
+        style={{ ...panel, width: 240, maxWidth: "100%" }}
+      /><ComboboxContent style={panel}
         ><ComboboxItem value="apple" textValue="Apple">Apple</ComboboxItem
         ><ComboboxItem value="banana" textValue="Banana">Banana</ComboboxItem
         ><ComboboxEmpty>Nothing found</ComboboxEmpty></ComboboxContent
       ></Combobox
-    >
-  </Row>
-  <Code
+    ></Row
+  ><Code
     code={language === "rust" ? "let count = 42;" : "let count = $state(42)"}
     {language}
     style={panel}
-  />
-  <Row style={{ gap: 8 }}
+  /><Row style={{ gap: 8, flexWrap: "wrap", flexShrink: 0 }}
     ><TextInput
       bind:value={query}
       placeholder="Search native text"
-      style={panel}
+      style={{ ...panel, width: 240, maxWidth: "100%" }}
     /><Button onPress={() => search.next()} style={panel}
       >Next match ({search.total})</Button
     ></Row
-  >
-  <View {...search.props} style={panel}>
-    <Text>Native text uses GPUI selection and native highlighting.</Text>
-  </View>
-  <Markdown
+  ><View {...search.props} style={panel}
+    ><Text>Native text uses GPUI selection and native highlighting.</Text></View
+  ><Markdown
     source={"# Markdown\nSvelte owns reactivity. GPUI owns **text, layout and paint**."}
     style={panel}
-  />
-  <Canvas
+  /><Canvas
     commands={[
       { type: "rect", x: 0, y: 0, width: 180, height: 40, fill: "#60a5fa" },
     ]}
     style={{ height: 48, flexShrink: 0 }}
-  />
-  <MotionView
+  /><MotionView
     initial={{ opacity: 0, left: -20 }}
     animate={{ opacity: 1, left: 0 }}
     transition={{ duration: 0.5 }}
     ><Text>Animation runs in GPUI</Text></MotionView
-  >
-  <VirtualList estimatedItemHeight={28} style={{ height: 180, flexShrink: 0 }}
+  ><VirtualList estimatedItemHeight={28} style={{ height: 180, flexShrink: 0 }}
     >{#each Array.from({ length: 1000 }, (_, i) => i) as id (id)}<Text
         style={{ height: 28 }}>Native row {id}</Text
       >{/each}</VirtualList
-  >
-</Column>
+  ></Column
+>

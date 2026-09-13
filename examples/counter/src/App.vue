@@ -34,6 +34,7 @@ const rootStyle: StyleDesc = {
   padding: 32,
   background: palette.background,
   color: palette.text,
+  overflow: "scroll",
 }
 
 const cardStyle: StyleDesc = {
@@ -43,7 +44,9 @@ const cardStyle: StyleDesc = {
   alignItems: "center",
   gap: 14,
   padding: 26,
-  minWidth: 280,
+  width: "100%",
+  maxWidth: 396,
+  flexShrink: 0,
   background: palette.panel,
   borderRadius: 16,
   borderWidth: 1,

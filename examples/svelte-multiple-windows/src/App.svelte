@@ -28,6 +28,7 @@
   style={{
     width: "100%",
     height: "100%",
+    overflow: "scroll",
     padding: 32,
     gap: 16,
     background: "#111827",

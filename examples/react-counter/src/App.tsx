@@ -23,6 +23,7 @@ export default function App() {
       style={{
         width: "100%",
         height: "100%",
+        overflow: "scroll",
         padding: 32,
         gap: 20,
         display: "flex",
@@ -36,7 +37,7 @@ export default function App() {
         testId="name"
         value={name}
         onChange={(event) => setName(event.value ?? "")}
-        style={{ width: 280, padding: 12, backgroundColor: "#1e293b" }}
+        style={{ width: 280, maxWidth: "100%", padding: 12, backgroundColor: "#1e293b" }}
       />
       <Text testId="count" style={{ fontSize: 48 }}>
         {count}

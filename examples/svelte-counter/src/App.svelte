@@ -18,21 +18,20 @@
   style={{
     width: "100%",
     height: "100%",
+    overflow: "scroll",
     padding: 32,
     gap: 20,
     background: "#111827",
     color: "#f8fafc",
   }}
->
-  <Text style={{ fontSize: 30, fontWeight: 700 }}>Hello, {name}</Text>
-  <TextInput
+  ><Text style={{ fontSize: 30, fontWeight: 700 }}>Hello, {name}</Text
+  ><TextInput
     testId="name"
     bind:value={name}
-    style={{ width: 280, padding: 12, background: "#1e293b" }}
-  />
-  <Text testId="count" style={{ fontSize: 48 }}>{count}</Text>
-  <Text>Derived with runes: {doubled}</Text>
-  <Row style={{ gap: 12 }}
+    style={{ width: 280, maxWidth: "100%", padding: 12, background: "#1e293b" }}
+  /><Text testId="count" style={{ fontSize: 48 }}>{count}</Text><Text
+    >Derived with runes: {doubled}</Text
+  ><Row style={{ gap: 12 }}
     ><Button testId="decrement" style={button} onPress={() => count--}>−</Button
     ><Button testId="increment" style={button} onPress={() => count++}>+</Button
     ><Button
@@ -40,6 +39,6 @@
       disabled={count === 0}
       onPress={() => (count = 0)}>Reset</Button
     ></Row
-  >
-  <Text>{size.width} × {size.height} · Svelte runes, GPUI rendering</Text>
-</Column>
+  ><Text>{size.width} × {size.height} · Svelte runes, GPUI rendering</Text
+  ></Column
+>
