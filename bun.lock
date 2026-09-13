@@ -4,7 +4,6 @@
   "workspaces": {
     "": {
       "name": "gpui-native-monorepo",
-      "version": "0.2.0",
       "devDependencies": {
         "@vitejs/plugin-vue": "catalog:",
         "oxc-transform": "^0.146.0",
@@ -60,6 +59,21 @@
     },
     "examples/counter": {
       "name": "@gpui-vue/example-counter",
+      "version": "0.2.0",
+      "dependencies": {
+        "@gpui-native/vue": "workspace:^",
+        "vue": "catalog:",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@vitejs/plugin-vue": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vue-tsc": "catalog:",
+      },
+    },
+    "examples/kit": {
+      "name": "@gpui-vue/example-kit",
       "version": "0.2.0",
       "dependencies": {
         "@gpui-native/vue": "workspace:^",
@@ -460,6 +474,8 @@
     "@gpui-vue/example-chat": ["@gpui-vue/example-chat@workspace:examples/chat"],
 
     "@gpui-vue/example-counter": ["@gpui-vue/example-counter@workspace:examples/counter"],
+
+    "@gpui-vue/example-kit": ["@gpui-vue/example-kit@workspace:examples/kit"],
 
     "@gpui-vue/example-market-stream": ["@gpui-vue/example-market-stream@workspace:examples/market-stream"],
 

@@ -546,6 +546,7 @@ export interface AnchoredProps extends HostProps {
 }
 
 export type GpuiElementType =
+  | (typeof import("./kit.js").KIT_COMPONENTS)[keyof typeof import("./kit.js").KIT_COMPONENTS]
   | "div"
   | "text"
   | "img"

@@ -15,6 +15,7 @@ const loaders: Record<string, () => Promise<unknown>> = {
 
   "audio-buffer": () => import("../../examples/audio-buffer/src/main.js"),
   canvas: () => import("../../examples/canvas/src/main.js"),
+  kit: () => import("../../examples/kit/src/main.js"),
   counter: () => import("../../examples/counter/src/main.js"),
   "market-stream": () => import("../../examples/market-stream/src/main.js"),
   "motion-timeline": () => import("../../examples/motion-timeline/src/main.js"),

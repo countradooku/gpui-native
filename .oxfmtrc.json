@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
+    "vendor/**",
     "**/dist/**",
     "**/node_modules/**",
     "packages/core/index.cjs",

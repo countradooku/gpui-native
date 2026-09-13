@@ -1,5 +1,7 @@
 # Svelte 5
 
+For GPUI Kit native components, see [the Kit integration guide](gpui-kit.md).
+
 `packages/svelte` provides the `@gpui-native/svelte` adapter for native GPUI
 windows and the shared GPUI WebAssembly renderer. Write `.svelte` components
 using `$state`, `$derived`, `$effect`, `$props`, `$bindable`, snippets, keyed

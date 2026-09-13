@@ -1,5 +1,7 @@
 # Framework adapter architecture
 
+For GPUI Kit native components, see [the Kit integration guide](gpui-kit.md).
+
 GPUI Native is the shared engine. Vue 3, React 19.2, and Svelte 5 have independent adapters using the same framework-neutral TypeScript runtime.
 
 ## Ownership

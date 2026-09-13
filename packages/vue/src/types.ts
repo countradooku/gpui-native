@@ -1,3 +1,4 @@
+import type { KitIntrinsicElements as importKitIntrinsicElements } from "@gpui-native/runtime/kit"
 import type * as Shared from "@gpui-native/runtime/types"
 import type { VNodeRef } from "@vue/runtime-core"
 export * from "@gpui-native/runtime/types"
@@ -13,7 +14,7 @@ export type InputProps = Shared.InputProps & { ref?: VNodeRef }
 export type TextareaProps = Shared.TextareaProps & { ref?: VNodeRef }
 export type VirtualListProps = Shared.VirtualListProps & { ref?: VNodeRef }
 
-export interface GpuiIntrinsicElements {
+export interface GpuiIntrinsicElements extends importKitIntrinsicElements {
   div: HostProps
   text: HostProps
   img: ImgProps

@@ -1,5 +1,7 @@
 # Components
 
+For GPUI Kit native components, see [the Kit integration guide](gpui-kit.md).
+
 `@gpui-native/vue`, `@gpui-native/react`, and `@gpui-native/svelte` export these names, including
 from their `/web` entries. Named components preserve the native host props and
 lower directly to the existing mutation protocol. GPUI still owns layout,

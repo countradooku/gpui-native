@@ -10,6 +10,10 @@ repository = "https://github.com/countradooku/gpui-native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+chrono = "0.4"
+gpui-component = { path = "../../vendor/gpui-kit/crates/component" }
+gpui-base = { path = "../../vendor/gpui-kit/crates/base" }
+gpui-kit-assets = { path = "../../vendor/gpui-kit/crates/assets" }
 base64 = "0.22"
 csscolorparser = "0.8.3"
 env_logger = "0.11"

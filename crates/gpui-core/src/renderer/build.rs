@@ -8,6 +8,10 @@
 
 use super::*;
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "host dispatch keeps inherited state setup and restoration together"
+)]
 pub(crate) fn build_element(
     id: u64,
     ctx: &mut BuildCtx,
@@ -85,15 +89,52 @@ pub(crate) fn build_element(
 
         // Polymorphic dispatch for all custom elements.
         custom_type => {
+            let deferred = matches!(
+                custom_type,
+                "kit-popover"
+                    | "kit-dialog"
+                    | "kit-sheet"
+                    | "kit-dock"
+                    | "kit-settings"
+                    | "kit-message-scroller"
+                    | "kit-hover-card"
+                    | "kit-notification"
+            );
             let custom_children: Vec<gpui::AnyElement> = element
                 .children
                 .iter()
                 .copied()
-                .filter(|child_id| ctx.tree.elements.contains_key(child_id))
+                .filter(|child_id| !deferred && ctx.tree.elements.contains_key(child_id))
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
             let inherited = ctx.inherited.clone();
+            let render_children = if deferred {
+                let inherited = inherited.clone();
+                let expected_type = custom_type.to_owned();
+                let render = cx.processor(move |view, index: Option<usize>, window, cx| {
+                    view.build_kit_children(
+                        id,
+                        &expected_type,
+                        index,
+                        inherited.clone(),
+                        window,
+                        cx,
+                    )
+                });
+                Some(std::rc::Rc::new(
+                    move |index: Option<usize>, window: &mut gpui::Window, cx: &mut gpui::App| {
+                        render(index, window, cx)
+                    },
+                ) as crate::kit::content::ChildRenderer)
+            } else {
+                None
+            };
             let render_ctx = CustomRenderContext {
+                element_type: &element.element_type,
+                child_count: element.children.len(),
+                auto_focus: element.auto_focus,
+                revision: element.subtree_revision,
+                render_children,
                 canvas_frames: ctx.tree.canvas_frames.clone(),
                 id,
                 events: &element.events,

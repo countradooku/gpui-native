@@ -16,7 +16,12 @@ export type MarkdownProps = ReactProps<Native.MarkdownProps>
 export type InputProps = ReactProps<Native.InputProps>
 export type TextareaProps = ReactProps<Native.TextareaProps>
 export type VirtualListProps = ReactProps<Native.VirtualListProps>
-export interface GpuiIntrinsicElements {
+type KitIntrinsicElements = {
+  [K in keyof import("@gpui-native/runtime/kit").KitIntrinsicElements]: ReactProps<
+    import("@gpui-native/runtime/kit").KitIntrinsicElements[K]
+  >
+}
+export interface GpuiIntrinsicElements extends KitIntrinsicElements {
   div: HostProps
   text: HostProps
   img: ImgProps
