@@ -197,16 +197,20 @@ impl TestGpuiRenderer {
         let clock = crate::automation::AutomationClock::default();
 
         let platform = gpui_platform::current_platform(false);
-        let mut cx = gpui::VisualTestAppContext::new(platform);
+        let mut cx = gpui::VisualTestAppContext::with_asset_source(
+            platform,
+            Arc::new(gpui_kit_assets::EmbeddedAssets),
+        );
         cx.update(|cx| {
+            crate::kit::init(cx);
             crate::custom_elements::input::init(cx);
         });
 
         // Open an offscreen window at (-10000, -10000) with the same GpuiView
         // and native GPU renderer as production.
         let window_handle = cx
-            .open_offscreen_window(window_size, |_window, app| {
-                app.new(|_cx| {
+            .open_offscreen_window(window_size, |window, app| {
+                let view = app.new(|_cx| {
                     GpuiView::new(
                         tree_clone,
                         callback_clone,
@@ -214,8 +218,10 @@ impl TestGpuiRenderer {
                         selection_clone,
                         clock,
                     )
-                })
+                });
+                crate::kit::wrap(view, window, app)
             })
+            .map(crate::kit::NativeWindow::new)
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {e}")))?;
 
         // Get the root entity (Entity<GpuiView>) from the window.
@@ -610,7 +616,11 @@ impl TestGpuiRenderer {
             cx.update_window(window, |_, window, app| {
                 view.update(app, |view, cx| {
                     view.reveal_virtual_list_ancestor(id);
-                    if let Some(handle) = view.focus_handles.get(&id) {
+                    if let Some(handle) = view
+                        .custom_registry
+                        .native_focus_handle(id, cx)
+                        .or_else(|| view.focus_handles.get(&id).cloned())
+                    {
                         handle.focus(window, cx);
                     }
                     cx.notify();

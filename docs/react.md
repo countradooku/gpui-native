@@ -1,5 +1,7 @@
 # React
 
+For GPUI Kit native components, see [the Kit integration guide](gpui-kit.md).
+
 `@gpui-native/react` is a React 19.2 custom renderer. It uses React's reconciler
 and the same Rust engine, native elements, mutation protocol, text pipeline,
 and WebAssembly backend as Vue. It does not load Vue or React DOM.

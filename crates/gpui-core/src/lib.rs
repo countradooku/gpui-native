@@ -18,6 +18,7 @@ mod gpu_binding;
 #[cfg(not(target_family = "wasm"))]
 pub use gpu_binding::{NativeWgpuAdapter, NativeWgpuDevice, request_wgpu_adapter};
 mod gpu_canvas;
+mod kit;
 mod markdown;
 mod motion;
 mod renderer;

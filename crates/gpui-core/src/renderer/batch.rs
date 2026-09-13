@@ -540,6 +540,7 @@ pub(crate) fn apply_parsed_batch_to_tree(
     // Validate relationships against a small structural shadow. This
     // catches cycles created across multiple ops while preserving atomicity.
     validate_batch_structure(tree, &parsed)?;
+    crate::kit::validation::validate(tree, &parsed)?;
 
     // Resolve styles. Touches the style table only; a failure here
     // sweeps back out whatever this call interned.

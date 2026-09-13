@@ -27,7 +27,7 @@
 )]
 mod api;
 mod backend;
-mod batch;
+pub(crate) mod batch;
 mod build;
 mod events;
 mod styles;
@@ -197,7 +197,7 @@ thread_local! {
     #[cfg(target_os = "macos")]
     static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(target_os = "macos")]
-    static GPUI_WINDOW: RefCell<Option<gpui::WindowHandle<GpuiView>>> = const { RefCell::new(None) };
+    static GPUI_WINDOW: RefCell<Option<crate::kit::NativeWindow>> = const { RefCell::new(None) };
     #[cfg(target_family = "wasm")]
     static WEB_APPS: RefCell<HashMap<u64, WebAppEntry>> = RefCell::new(HashMap::new());
     /// Shared scroll handles — GpuiView writes here during render(),
@@ -231,7 +231,7 @@ pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f
 #[cfg(target_family = "wasm")]
 struct WebAppEntry {
     app: Rc<gpui::ApplicationHandle>,
-    window: Rc<RefCell<Option<gpui::WindowHandle<GpuiView>>>>,
+    window: Rc<RefCell<Option<crate::kit::NativeWindow>>>,
 }
 
 #[cfg(target_family = "wasm")]
@@ -584,8 +584,10 @@ fn threaded_app_sender() -> Result<mpsc::UnboundedSender<ThreadedAppCommand>> {
             enable_per_monitor_dpi();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 gpui_platform::application()
+                    .with_assets(gpui_kit_assets::EmbeddedAssets)
                     .with_quit_mode(gpui::QuitMode::Explicit)
                     .run(move |cx| {
+                        crate::kit::init(cx);
                         crate::custom_elements::input::init(cx);
                         crate::custom_elements::img::init(cx);
                         cx.spawn(async move |cx| {
@@ -660,10 +662,14 @@ async fn run_threaded_app_commands(
                     let window = cx
                         .open_window(
                             to_gpui_window_options(&window_options, bounds),
-                            |_window, cx| {
-                                cx.new(|_| GpuiView::new(tree, callback, title, selection, clock))
+                            |window, cx| {
+                                let view = cx.new(|_| {
+                                    GpuiView::new(tree, callback, title, selection, clock)
+                                });
+                                crate::kit::wrap(view, window, cx)
                             },
                         )
+                        .map(crate::kit::NativeWindow::new)
                         .map_err(|error| format!("Failed to open the GPUI window: {error}"))?;
                     let window_id = window.window_id();
                     cx.on_window_closed(move |_cx, closed_id| {
@@ -691,7 +697,7 @@ async fn run_threaded_app_commands(
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 fn refresh_ui_window(
-    window: gpui::WindowHandle<GpuiView>,
+    window: crate::kit::NativeWindow,
     cx: &mut gpui::AsyncApp,
 ) -> gpui::Result<()> {
     window.update(cx, |_view, window, cx| {
@@ -707,7 +713,7 @@ fn refresh_ui_window(
 )]
 async fn run_ui_commands(
     mut commands: mpsc::UnboundedReceiver<UiCommand>,
-    window: gpui::WindowHandle<GpuiView>,
+    window: crate::kit::NativeWindow,
     cx: &mut gpui::AsyncApp,
 ) {
     let mut closed_by_command = false;
@@ -870,7 +876,11 @@ async fn run_ui_commands(
             }
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
                 view.reveal_virtual_list_ancestor(id);
-                if let Some(handle) = view.focus_handles.get(&id) {
+                if let Some(handle) = view
+                    .custom_registry
+                    .native_focus_handle(id, cx)
+                    .or_else(|| view.focus_handles.get(&id).cloned())
+                {
                     handle.focus(window, cx);
                 }
                 cx.notify();
@@ -1372,6 +1382,89 @@ impl GpuiView {
         self.render_tree.clone()
     }
 
+    fn build_kit_children(
+        &mut self,
+        parent: u64,
+        expected_type: &str,
+        index: Option<usize>,
+        mut inherited: Inherited,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        use gpui::prelude::*;
+        let tree = self.tree_snapshot();
+        let Some(element) = tree
+            .elements
+            .get(&parent)
+            .filter(|e| e.element_type == expected_type)
+        else {
+            return gpui::Empty.into_any_element();
+        };
+        let callback = self.event_callback.clone();
+        let mut motion_active = false;
+        let mut highlight_events = Vec::new();
+        if let Some(declaration) = inherited.highlight.as_ref().map(|ctx| ctx.declaration) {
+            inherited.highlight = tree
+                .elements
+                .get(&declaration)
+                .and_then(|element| element.custom_props.get("highlight"))
+                .and_then(|value| {
+                    resolve_highlight(
+                        &mut self.highlights,
+                        &tree,
+                        declaration,
+                        value,
+                        &self.theme,
+                        false,
+                    )
+                })
+                .map(|(context, _)| context);
+        }
+
+        let mut build_ctx = BuildCtx {
+            tree: &tree,
+            event_callback: &callback,
+            focus_handles: &self.focus_handles,
+            scroll_handles: &mut self.scroll_handles,
+            custom_registry: &mut self.custom_registry,
+            virtual_lists: &mut self.virtual_lists,
+            motion_states: &mut self.motion_states,
+            now: self.clock.now(),
+            motion_active: &mut motion_active,
+            selection: self.selection.clone(),
+            inherited,
+            highlights: &mut self.highlights,
+            highlight_events: &mut highlight_events,
+            theme: &self.theme,
+        };
+        let children: Vec<_> = element
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| index.is_none_or(|index| index == *i))
+            .map(|(_, id)| build_element(*id, &mut build_ctx, window, cx))
+            .collect();
+        for (id, total) in highlight_events {
+            emit_event_full(&callback, id, "highlight", |event| {
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "match count is represented as a JavaScript number"
+                )]
+                {
+                    event.match_count = Some(total as f64);
+                }
+            });
+        }
+        if motion_active && self.clock.is_playing() {
+            window.request_animation_frame();
+        }
+        gpui::div()
+            .flex()
+            .flex_col()
+            .children(children)
+            .into_any_element()
+    }
+
     fn build_virtual_child(
         &mut self,
         list_id: u64,
@@ -1668,8 +1761,16 @@ impl GpuiView {
                 .and_then(|index| isize::try_from(index).ok())
         };
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
-            matches!(element.element_type.as_str(), "input" | "textarea")
-                || tab_index(element).is_some()
+            matches!(
+                element.element_type.as_str(),
+                "input"
+                    | "textarea"
+                    | "kit-button"
+                    | "kit-checkbox"
+                    | "kit-radio"
+                    | "kit-switch"
+                    | "kit-toggle"
+            ) || tab_index(element).is_some()
                 || element.events.contains("keyDown")
                 || element.events.contains("keyUp")
                 || element.events.contains("focus")
@@ -1678,7 +1779,17 @@ impl GpuiView {
         // Create handles for elements that need focus but don't have one yet.
         for (&id, element) in &tree.elements {
             let tab_index = tab_index(element).or_else(|| {
-                matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
+                matches!(
+                    element.element_type.as_str(),
+                    "input"
+                        | "textarea"
+                        | "kit-button"
+                        | "kit-checkbox"
+                        | "kit-radio"
+                        | "kit-switch"
+                        | "kit-toggle"
+                )
+                .then_some(0)
             });
 
             if needs_focus(element) && !self.focus_handles.contains_key(&id) {
@@ -1688,7 +1799,7 @@ impl GpuiView {
                 };
                 // Focus once, at creation. Re-focusing every frame would
                 // steal focus back from whatever the user clicked next.
-                if element.auto_focus {
+                if element.auto_focus && !element.element_type.starts_with("kit-") {
                     handle.focus(window, cx);
                 }
                 self.focus_handles.insert(id, handle);
@@ -1708,6 +1819,9 @@ impl GpuiView {
                 .is_some_and(|element| element.events.contains(event))
         });
         for (&id, element) in &tree.elements {
+            if element.element_type.starts_with("kit-") {
+                continue;
+            }
             let Some(handle) = self.focus_handles.get(&id).cloned() else {
                 continue;
             };
@@ -1716,18 +1830,22 @@ impl GpuiView {
                 && !self.focus_subscriptions.contains_key(&focus_key)
             {
                 let callback = callback.clone();
-                let subscription = cx.on_focus(&handle, window, move |_this, _window, _cx| {
-                    emit_event_full(&callback, id, "focus", |_| {});
-                });
+                let listener =
+                    move |_: &mut Self, _: &mut gpui::Window, _: &mut gpui::Context<Self>| {
+                        emit_event_full(&callback, id, "focus", |_| {});
+                    };
+                let subscription = cx.on_focus(&handle, window, listener);
                 self.focus_subscriptions.insert(focus_key, subscription);
             }
             let blur_key = (id, "blur".to_string());
             if element.events.contains("blur") && !self.focus_subscriptions.contains_key(&blur_key)
             {
                 let callback = callback.clone();
-                let subscription = cx.on_blur(&handle, window, move |_this, _window, _cx| {
-                    emit_event_full(&callback, id, "blur", |_| {});
-                });
+                let listener =
+                    move |_: &mut Self, _: &mut gpui::Window, _: &mut gpui::Context<Self>| {
+                        emit_event_full(&callback, id, "blur", |_| {});
+                    };
+                let subscription = cx.on_blur(&handle, window, listener);
                 self.focus_subscriptions.insert(blur_key, subscription);
             }
         }
@@ -1748,7 +1866,7 @@ impl gpui::Render for GpuiView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        use gpui::IntoElement;
+        use gpui::{IntoElement, ParentElement as _, Styled as _};
 
         window.set_window_title(&self.window_title);
 
@@ -1902,7 +2020,13 @@ impl gpui::Render for GpuiView {
             window.request_animation_frame();
         }
 
-        result
+        gpui::div()
+            .size_full()
+            .child(result)
+            .children(gpui_component::Root::render_sheet_layer(window, cx))
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
+            .children(gpui_component::Root::render_notification_layer(window, cx))
+            .into_any_element()
     }
 }
 

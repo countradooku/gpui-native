@@ -301,8 +301,10 @@ impl GpuiRenderer {
         let window_slot = Rc::new(RefCell::new(None));
         let window_slot_for_launch = window_slot.clone();
 
-        let application = gpui_platform::single_threaded_web();
+        let application =
+            gpui_platform::single_threaded_web().with_assets(gpui_kit_assets::EmbeddedAssets);
         let application_handle = application.run_embedded(move |cx: &mut gpui::App| {
+            crate::kit::init(cx);
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
             let bounds = gpui::Bounds::centered(
@@ -310,10 +312,17 @@ impl GpuiRenderer {
                 gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
                 cx,
             );
-            match cx.open_window(
-                to_gpui_window_options(&window_options, bounds),
-                |_window, cx| cx.new(|_| GpuiView::new(tree, callback, title, selection, clock)),
-            ) {
+            match cx
+                .open_window(
+                    to_gpui_window_options(&window_options, bounds),
+                    |window, cx| {
+                        let view =
+                            cx.new(|_| GpuiView::new(tree, callback, title, selection, clock));
+                        crate::kit::wrap(view, window, cx)
+                    },
+                )
+                .map(crate::kit::NativeWindow::new)
+            {
                 Ok(window) => {
                     let window_id = window.window_id();
                     let initialized_for_close = initialized.clone();
@@ -392,8 +401,10 @@ impl GpuiRenderer {
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
+            .with_assets(gpui_kit_assets::EmbeddedAssets)
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
+            crate::kit::init(cx);
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
@@ -405,20 +416,24 @@ impl GpuiRenderer {
                 cx,
             );
 
-            match cx.open_window(
-                to_gpui_window_options(&window_options, bounds),
-                |_window, cx| {
-                    cx.new(|_| {
-                        GpuiView::new(
-                            tree.clone(),
-                            callback.clone(),
-                            title,
-                            selection.clone(),
-                            clock.clone(),
-                        )
-                    })
-                },
-            ) {
+            match cx
+                .open_window(
+                    to_gpui_window_options(&window_options, bounds),
+                    |window, cx| {
+                        let view = cx.new(|_| {
+                            GpuiView::new(
+                                tree.clone(),
+                                callback.clone(),
+                                title,
+                                selection.clone(),
+                                clock.clone(),
+                            )
+                        });
+                        crate::kit::wrap(view, window, cx)
+                    },
+                )
+                .map(crate::kit::NativeWindow::new)
+            {
                 Ok(window_handle) => {
                     let window_id = window_handle.window_id();
                     cx.on_window_closed(move |_cx, closed_id| {
@@ -1086,7 +1101,11 @@ impl GpuiRenderer {
         #[cfg(target_os = "macos")]
         return update_window(move |view, window, cx| {
             view.reveal_virtual_list_ancestor(id);
-            if let Some(handle) = view.focus_handles.get(&id) {
+            if let Some(handle) = view
+                .custom_registry
+                .native_focus_handle(id, cx)
+                .or_else(|| view.focus_handles.get(&id).cloned())
+            {
                 handle.focus(window, cx);
             }
             cx.notify();
@@ -1099,7 +1118,11 @@ impl GpuiRenderer {
         #[cfg(target_family = "wasm")]
         return update_web_window(self.web_renderer_id, move |view, window, cx| {
             view.reveal_virtual_list_ancestor(id);
-            if let Some(handle) = view.focus_handles.get(&id) {
+            if let Some(handle) = view
+                .custom_registry
+                .native_focus_handle(id, cx)
+                .or_else(|| view.focus_handles.get(&id).cloned())
+            {
                 handle.focus(window, cx);
             }
             cx.notify();

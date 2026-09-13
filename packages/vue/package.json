@@ -58,6 +58,10 @@
     "./webgpu-native": {
       "types": "./dist/webgpu-native.d.ts",
       "import": "./dist/webgpu-native.js"
+    },
+    "./kit": {
+      "types": "./dist/kit.d.ts",
+      "import": "./dist/kit.js"
     }
   },
   "scripts": {

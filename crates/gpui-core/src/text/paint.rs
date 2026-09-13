@@ -38,9 +38,59 @@ pub type SharedSelection = Arc<Mutex<SelectionState>>;
 struct RegEntry {
     key: Arc<str>,
     text: SharedString,
-    layout: TextLayout,
+    layout: RegisteredLayout,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
+}
+
+/// GPUI flow text and canvas labels share the same selection registry and washes.
+#[derive(Clone)]
+enum RegisteredLayout {
+    Flow(TextLayout),
+    Line {
+        line: Box<gpui::ShapedLine>,
+        origin: gpui::Point<gpui::Pixels>,
+        height: gpui::Pixels,
+    },
+}
+impl RegisteredLayout {
+    fn bounds(&self) -> Bounds<gpui::Pixels> {
+        match self {
+            Self::Flow(layout) => layout.bounds(),
+            Self::Line {
+                line,
+                origin,
+                height,
+            } => Bounds::new(*origin, size(line.width(), *height)),
+        }
+    }
+    fn index_for_position(&self, position: gpui::Point<gpui::Pixels>) -> Result<usize, usize> {
+        match self {
+            Self::Flow(layout) => layout.index_for_position(position),
+            Self::Line { line, origin, .. } => Ok(line.closest_index_for_x(position.x - origin.x)),
+        }
+    }
+    fn rects(&self, range: &Range<usize>) -> Vec<Bounds<gpui::Pixels>> {
+        match self {
+            Self::Flow(layout) => range_rects(layout, range, 0., 0.),
+            Self::Line {
+                line,
+                origin,
+                height,
+            } => {
+                let start = line.x_for_index(range.start);
+                let end = line.x_for_index(range.end);
+                if end <= start {
+                    vec![]
+                } else {
+                    vec![Bounds::new(
+                        point(origin.x + start, origin.y),
+                        size(end - start, *height),
+                    )]
+                }
+            }
+        }
+    }
 }
 
 /// Full element box that owns whether a press may start a selection.
@@ -257,81 +307,27 @@ impl SelectableText {
 
 /// A selectable text element: `StyledText` with a canvas underlay that paints
 /// the selection wash and registers into the frame registry.
-pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
-    let SelectableText {
-        element_id,
-        sub,
-        text,
-        runs,
-        selection,
-        wash_color,
-        extra_wash,
-        links,
-        on_link,
-        selectable,
-        group,
-        highlight,
-    } = opts;
-    let key = selection_key(element_id, sub);
-
-    let styled = match runs {
-        Some(runs) => StyledText::new(text.clone()).with_runs(runs),
-        None => StyledText::new(text.clone()),
+pub fn selectable_text(mut opts: SelectableText) -> gpui::AnyElement {
+    let key = selection_key(opts.element_id, opts.sub);
+    let styled = match opts.runs.take() {
+        Some(runs) => StyledText::new(opts.text.clone()).with_runs(runs),
+        None => StyledText::new(opts.text.clone()),
     };
     let layout = styled.layout().clone();
-
     let underlay = canvas(
         |_, _, _| (),
         move |_, (), window, _| {
-            if let Some(paint) = &extra_wash {
+            if let Some(paint) = &opts.extra_wash {
                 paint(&layout, window);
             }
-            // Search washes sit UNDER the selection wash, so a selection over a
-            // match still reads as a selection.
-            let washes = match &highlight {
-                Some(HighlightSource::Resolved(ctx)) => {
-                    super::search::washes_for_retained_run(ctx, &key)
-                }
-                Some(HighlightSource::Native(ctx)) => {
-                    super::search::washes_for_native_run(ctx, &key, &text)
-                }
-                None => Vec::new(),
-            };
-            paint_highlight_washes(&layout, element_id, sub, &text, &washes, window);
-            if let Some(range) = selectable
-                .then(|| selection.lock().wash_range(&key))
-                .flatten()
-            {
-                for rect in range_rects(&layout, &range, 0.0, 0.0) {
-                    window.paint_quad(quad(
-                        rect,
-                        px(0.0),
-                        wash_color,
-                        px(0.0),
-                        gpui::transparent_black(),
-                        BorderStyle::default(),
-                    ));
-                }
-            }
-            if selectable {
-                REGISTRY.with(|r| {
-                    r.borrow_mut().push(RegEntry {
-                        key: key.clone(),
-                        text: text.clone(),
-                        layout: layout.clone(),
-                        group,
-                    });
-                });
-            }
-            PAINTED.with(|p| p.borrow_mut().push(text.clone()));
-            if let Some(on_link) = &on_link {
-                register_link_listener(window, &layout, &links, on_link, &selection);
+            register_and_paint_text(&opts, &key, RegisteredLayout::Flow(layout.clone()), window);
+            if let Some(on_link) = &opts.on_link {
+                register_link_listener(window, &layout, &opts.links, on_link, &opts.selection);
             }
         },
     )
     .absolute()
     .size_full();
-
     div()
         .relative()
         .child(underlay)
@@ -339,9 +335,84 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .into_any_element()
 }
 
+fn register_and_paint_text(
+    opts: &SelectableText,
+    key: &Arc<str>,
+    layout: RegisteredLayout,
+    window: &mut Window,
+) {
+    let washes = match &opts.highlight {
+        Some(HighlightSource::Resolved(ctx)) => super::search::washes_for_retained_run(ctx, key),
+        Some(HighlightSource::Native(ctx)) => {
+            super::search::washes_for_native_run(ctx, key, &opts.text)
+        }
+        None => Vec::new(),
+    };
+    paint_highlight_washes(
+        &layout,
+        opts.element_id,
+        opts.sub,
+        &opts.text,
+        &washes,
+        window,
+    );
+    if let Some(range) = opts
+        .selectable
+        .then(|| opts.selection.lock().wash_range(key))
+        .flatten()
+    {
+        for rect in layout.rects(&range) {
+            window.paint_quad(quad(
+                rect,
+                px(0.),
+                opts.wash_color,
+                px(0.),
+                gpui::transparent_black(),
+                BorderStyle::default(),
+            ));
+        }
+    }
+    if opts.selectable {
+        REGISTRY.with(|r| {
+            r.borrow_mut().push(RegEntry {
+                key: key.clone(),
+                text: opts.text.clone(),
+                layout,
+                group: opts.group,
+            });
+        });
+    }
+    log_painted_text(opts.text.clone());
+}
+
+/// Register and paint a label whose geometry is owned by a GPUI canvas plot.
+/// Reuses the same matcher, hit testing, selection and highlight logging as flow text.
+pub(crate) fn shaped_text(
+    opts: &SelectableText,
+    line: &gpui::ShapedLine,
+    origin: gpui::Point<gpui::Pixels>,
+    height: gpui::Pixels,
+    align: gpui::TextAlign,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    let key = selection_key(opts.element_id, opts.sub);
+    register_and_paint_text(
+        opts,
+        &key,
+        RegisteredLayout::Line {
+            line: Box::new(line.clone()),
+            origin,
+            height,
+        },
+        window,
+    );
+    let _ = line.paint(origin, height, align, None, window, cx);
+}
+
 /// Paint one run's highlight washes and log their geometry.
 fn paint_highlight_washes(
-    layout: &TextLayout,
+    layout: &RegisteredLayout,
     element_id: u64,
     sub: usize,
     text: &SharedString,
@@ -349,7 +420,7 @@ fn paint_highlight_washes(
     window: &mut Window,
 ) {
     for wash in washes {
-        let rects = range_rects(layout, &wash.range, 0.0, 0.0);
+        let rects = layout.rects(&wash.range);
         if rects.is_empty() {
             continue;
         }
@@ -742,6 +813,16 @@ fn range_rects_with_positions(
         cur = next;
     }
     rects
+}
+
+/// Register an upstream text element whose own painter must remain in charge of animated glyphs.
+pub(crate) fn observe_flow_text(
+    opts: &super::SelectableText,
+    layout: TextLayout,
+    window: &mut Window,
+) {
+    let key = selection_key(opts.element_id, opts.sub);
+    register_and_paint_text(opts, &key, RegisteredLayout::Flow(layout), window);
 }
 
 #[cfg(test)]

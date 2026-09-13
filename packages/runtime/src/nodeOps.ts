@@ -1,4 +1,5 @@
 import { isEventProp, patchEvent, unregisterEventHandlers } from "./events.js"
+import { KIT_COMPONENTS, normalizeKitPropName, normalizeKitProp } from "./kit.js"
 import type { NativeNodeId, NativeRenderer } from "./native.js"
 import {
   materializeChildren,
@@ -11,6 +12,7 @@ import {
 import type { GpuiElementType, StyleDesc } from "./types.js"
 
 export const GPUI_ELEMENT_TYPES = [
+  ...Object.values(KIT_COMPONENTS),
   "div",
   "text",
   "img",
@@ -239,6 +241,11 @@ export function createPatchProp(renderer: NativeRenderer) {
   return (element: GpuiContainer, key: string, previous: unknown, next: unknown): void => {
     if (element.kind !== "element") {
       throw new Error("Properties can only be patched on GPUI elements")
+    }
+
+    if (element.tag.startsWith("kit-")) {
+      key = normalizeKitPropName(key)
+      next = normalizeKitProp(key, next)
     }
 
     if (key === "style") {

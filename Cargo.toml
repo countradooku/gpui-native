@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/gpui-core"]
+exclude = ["vendor/gpui-kit"]
 resolver = "2"
 
 [workspace.package]

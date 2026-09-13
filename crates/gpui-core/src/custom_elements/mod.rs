@@ -26,6 +26,11 @@ pub mod markdown;
 /// Context passed to `CustomElement::render()` with everything needed
 /// to build GPUI elements with events and focus.
 pub struct CustomRenderContext<'a> {
+    pub(crate) element_type: &'a str,
+    pub(crate) child_count: usize,
+    pub(crate) auto_focus: bool,
+    pub(crate) revision: u64,
+    pub(crate) render_children: Option<crate::kit::content::ChildRenderer>,
     pub canvas_frames: std::sync::Arc<parking_lot::Mutex<crate::gpu_canvas::CanvasFrames>>,
     /// Numeric element ID (matches Vue's instance ID).
     pub id: u64,
@@ -192,6 +197,11 @@ pub trait CustomElement: 'static {
         cx: &mut gpui::Context<crate::renderer::GpuiView>,
     ) -> gpui::AnyElement;
 
+    /// The native control's focus target, when it owns an editing or navigation entity.
+    fn native_focus_handle(&self, _cx: &gpui::App) -> Option<gpui::FocusHandle> {
+        None
+    }
+
     /// Apply a changed prop from the retained tree. Removed props arrive as null.
     fn set_prop(&mut self, key: &str, value: serde_json::Value);
 
@@ -222,6 +232,9 @@ struct CustomElementEntry {
     element_type: String,
     element: Box<dyn CustomElement>,
     applied_props: HashMap<String, serde_json::Value>,
+    focus: Option<gpui::FocusHandle>,
+    focus_subscription: Option<gpui::Subscription>,
+    blur_subscription: Option<gpui::Subscription>,
 }
 
 impl CustomElementEntry {
@@ -282,6 +295,22 @@ impl CustomElementRegistry {
     /// Create a registry pre-loaded with all built-in custom elements.
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
+        crate::kit::elements::register(&mut registry);
+        crate::kit::extras::register(&mut registry);
+        crate::kit::application::register(&mut registry);
+        crate::kit::table::register(&mut registry);
+        crate::kit::lists::register(&mut registry);
+        crate::kit::workspace::register(&mut registry);
+        crate::kit::charts::register(&mut registry);
+        crate::kit::menu::register(&mut registry);
+        crate::kit::theme::register(&mut registry);
+        crate::kit::collections::register(&mut registry);
+        crate::kit::input::register(&mut registry);
+        crate::kit::layout::register(&mut registry);
+        crate::kit::choice::register(&mut registry);
+        crate::kit::overlays::register(&mut registry);
+        crate::kit::compound::register(&mut registry);
+        crate::kit::stateful::register(&mut registry);
         registry.register(Box::new(input::InputFactory));
         registry.register(Box::new(input::TextareaFactory));
         registry.register(Box::new(anchored::AnchoredFactory));
@@ -318,6 +347,9 @@ impl CustomElementRegistry {
                     element_type: element_type.to_string(),
                     element: factory.create(id),
                     applied_props: HashMap::new(),
+                    focus: None,
+                    focus_subscription: None,
+                    blur_subscription: None,
                 }))
             }
         }
@@ -346,7 +378,51 @@ impl CustomElementRegistry {
             "{element_type} received an event its adapter does not report as supported"
         );
         entry.sync(props);
-        entry.element.render(ctx, window, cx)
+        let (id, focus, blur, auto_focus) = (
+            ctx.id,
+            ctx.events.contains("focus"),
+            ctx.events.contains("blur"),
+            ctx.auto_focus,
+        );
+        let callback = ctx.event_callback.clone();
+        let fallback = ctx.focus_handle.cloned();
+        let rendered = entry.element.render(ctx, window, cx);
+        if element_type.starts_with("kit-") {
+            let handle = entry.element.native_focus_handle(cx).or(fallback);
+            let first = entry.focus.is_none();
+            if entry.focus != handle {
+                entry.focus_subscription = None;
+                entry.blur_subscription = None;
+                entry.focus = handle;
+            }
+            if !focus {
+                entry.focus_subscription = None;
+            }
+            if !blur {
+                entry.blur_subscription = None;
+            }
+            if let Some(handle) = &entry.focus {
+                if focus && entry.focus_subscription.is_none() {
+                    let callback = callback.clone();
+                    entry.focus_subscription = Some(cx.on_focus(handle, window, move |_, _, _| {
+                        crate::renderer::emit_event_full(&callback, id, "focus", |_| {});
+                    }));
+                }
+                if blur && entry.blur_subscription.is_none() {
+                    entry.blur_subscription = Some(cx.on_blur(handle, window, move |_, _, _| {
+                        crate::renderer::emit_event_full(&callback, id, "blur", |_| {});
+                    }));
+                }
+                if first && auto_focus {
+                    handle.focus(window, cx);
+                }
+            }
+        }
+        rendered
+    }
+
+    pub(crate) fn native_focus_handle(&self, id: u64, cx: &gpui::App) -> Option<gpui::FocusHandle> {
+        self.instances.get(&id)?.element.native_focus_handle(cx)
     }
 
     /// Called when Vue destroys an element.
@@ -460,6 +536,9 @@ mod tests {
                 destroyed,
             }),
             applied_props: HashMap::new(),
+            focus: None,
+            focus_subscription: None,
+            blur_subscription: None,
         };
         let props = HashMap::from([
             ("source".to_string(), serde_json::json!("first")),

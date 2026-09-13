@@ -1,9 +1,11 @@
+import { KIT_COMPONENTS } from "@gpui-native/runtime/kit"
 import MagicString from "magic-string"
 import { compile, compileModule, parse, VERSION, type CompileResult } from "svelte/compiler"
 import ts from "typescript"
 
 export const SVELTE_VERSION = "5.57.0"
 const tags = new Set([
+  ...Object.values(KIT_COMPONENTS),
   "div",
   "text",
   "img",

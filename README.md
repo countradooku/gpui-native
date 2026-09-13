@@ -6,6 +6,12 @@
 
 A framework-neutral UI engine built on [Zed's GPUI](https://gpui.rs/), with a retained Rust component runtime and native and WebAssembly hosts. Vue 3, React 19.2, and Svelte 5 have dedicated adapters with native and browser support.
 
+## GPUI Kit
+
+[GPUI Kit](https://github.com/longbridge/gpui-kit) is integrated into the shared native engine, with 86 typed components for Vue, React and Svelte. Import them from `@gpui-native/<framework>/kit`. Native controls, editors, tables, menus, overlays, charts, docking and settings share the same desktop and browser implementation.
+
+See [the Kit guide and complete catalog](docs/gpui-kit.md), or run the [Kit gallery](examples/kit/src/App.vue).
+
 ## Status
 
 GPUI Native is an early `0.2.x` release. Native rendering runs on Apple Silicon

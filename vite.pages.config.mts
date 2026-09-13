@@ -52,6 +52,7 @@ export default defineConfig({
         "react-counter": resolve(webRoot, "examples/react-counter/index.html"),
         "react-showcase": resolve(webRoot, "examples/react-showcase/index.html"),
         "react-multiple-windows": resolve(webRoot, "examples/react-multiple-windows/index.html"),
+        kit: resolve(webRoot, "examples/kit/index.html"),
         counter: resolve(webRoot, "examples/counter/index.html"),
         canvas: resolve(webRoot, "examples/canvas/index.html"),
         "market-stream": resolve(webRoot, "examples/market-stream/index.html"),

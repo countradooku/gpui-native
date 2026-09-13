@@ -1,5 +1,11 @@
 import { buttonHostProps } from "@gpui-native/runtime/button"
 import { EVENT_PROPS } from "@gpui-native/runtime/events"
+import {
+  KIT_COMPONENTS,
+  KIT_MODEL_PROPS,
+  kitHostProps,
+  type KitComponentProps,
+} from "@gpui-native/runtime/kit"
 import type { Component } from "svelte"
 
 import { assign_nodes, render_effect, snippet, untrack, snapshot } from "./engine.js"
@@ -25,28 +31,49 @@ import type {
   MotionTransition,
 } from "./types.js"
 
-type NativeComponent<Props extends HostProps> = Component<
-  Props,
-  ElementRef,
-  "ref" | ("value" extends keyof Props ? "value" : never)
->
+type NativeComponent<
+  Props extends HostProps,
+  Binding extends keyof Props & string = "value" extends keyof Props ? "value" : never,
+> = Component<Props, ElementRef, "ref" | Binding>
 const eventNames = new Map([
   ...EVENT_PROPS.map(([name]) => [name.toLowerCase(), name] as const),
   ["onpress", "onPress"],
 ])
 type Lower = (props: Record<string, unknown>) => Record<string, unknown>
 
-function primitive<Props extends HostProps>(
+/** Share binding semantics between named Kit components and compiled native tags. */
+export function kitBindingProps(
+  name: keyof KitComponentProps,
+  source: Record<string, unknown>,
+): Lower {
+  return (props) => {
+    const model = KIT_MODEL_PROPS[name as keyof typeof KIT_MODEL_PROPS]
+    if (!model) return kitHostProps(props)
+    const changed = props.onValueChange
+    return kitHostProps({
+      ...props,
+      onValueChange: (value: unknown) => {
+        Object.getOwnPropertyDescriptor(source, model)?.set?.(value)
+        if (typeof changed === "function") changed(value)
+      },
+    })
+  }
+}
+
+export function nativePrimitive<
+  Props extends HostProps,
+  Binding extends keyof Props & string = "value" extends keyof Props ? "value" : never,
+>(
   tag: string,
-  lower?: () => Lower,
+  lower?: (props: Record<string, unknown>) => Lower,
   editor = false,
-): NativeComponent<Props> {
+): NativeComponent<Props, Binding> {
   return ((anchor: HostNode, props: Record<string, unknown>) => {
     const element = new HostElement(tag)
     const childAnchor = new HostComment()
     element.append(childAnchor)
     assign_nodes(element, element)
-    const transform = lower?.()
+    const transform = lower?.(props)
     const instance: ElementRef = {
       get id() {
         element.rootController()?.flush()
@@ -90,27 +117,27 @@ function primitive<Props extends HostProps>(
       return () => untrack(() => setRef(null))
     })
     return instance
-  }) as unknown as NativeComponent<Props>
+  }) as unknown as NativeComponent<Props, Binding>
 }
-export const View = primitive<HostProps>("div")
-export const Text = primitive<HostProps>("text")
-export const Image = primitive<ImageProps>("img")
-export const Svg = primitive<SvgProps>("svg")
-export const Canvas = primitive<CanvasProps>("canvas")
-export const Anchored = primitive<AnchoredProps>("anchored")
-export const Code = primitive<CodeProps>("code")
-export const Diff = primitive<DiffProps>("diff")
-export const Markdown = primitive<MarkdownProps>("markdown")
-export const VirtualList = primitive<VirtualListProps>("virtual-list")
-export const TextInput = primitive<TextInputProps>("input", undefined, true)
-export const TextArea = primitive<TextAreaProps>("textarea", undefined, true)
+export const View = nativePrimitive<HostProps>("div")
+export const Text = nativePrimitive<HostProps>("text")
+export const Image = nativePrimitive<ImageProps>("img")
+export const Svg = nativePrimitive<SvgProps>("svg")
+export const Canvas = nativePrimitive<CanvasProps>("canvas")
+export const Anchored = nativePrimitive<AnchoredProps>("anchored")
+export const Code = nativePrimitive<CodeProps>("code")
+export const Diff = nativePrimitive<DiffProps>("diff")
+export const Markdown = nativePrimitive<MarkdownProps>("markdown")
+export const VirtualList = nativePrimitive<VirtualListProps>("virtual-list")
+export const TextInput = nativePrimitive<TextInputProps>("input", undefined, true)
+export const TextArea = nativePrimitive<TextAreaProps>("textarea", undefined, true)
 const layout = (flexDirection: string) => () => (props: Record<string, unknown>) => ({
   ...props,
   style: { display: "flex", flexDirection, ...(props.style as StyleDesc) },
 })
-export const Row = primitive<HostProps>("div", layout("row"))
-export const Column = primitive<HostProps>("div", layout("column"))
-export const ScrollView = primitive<ScrollViewProps>(
+export const Row = nativePrimitive<HostProps>("div", layout("row"))
+export const Column = nativePrimitive<HostProps>("div", layout("column"))
+export const ScrollView = nativePrimitive<ScrollViewProps>(
   "div",
   () =>
     ({ horizontal, style, ...props }) => ({
@@ -124,11 +151,11 @@ export const ScrollView = primitive<ScrollViewProps>(
       },
     }),
 )
-export const Button = primitive<ButtonProps>("div", () => {
+export const Button = nativePrimitive<ButtonProps>("div", () => {
   const state = { spacePressed: false }
   return (props) => buttonHostProps(props as ButtonProps, state)
 })
-export const MotionView = primitive<MotionViewProps>(
+export const MotionView = nativePrimitive<MotionViewProps>(
   "div",
   () =>
     ({ initial, animate, transition, ...props }) => ({
@@ -145,6 +172,12 @@ export function stagger(
   return { ...transition, stagger: each, staggerIndex: index }
 }
 const hosts = {
+  ...Object.fromEntries(
+    Object.entries(KIT_COMPONENTS).map(([name, tag]) => [
+      tag,
+      nativePrimitive(tag, (source) => kitBindingProps(name as keyof KitComponentProps, source)),
+    ]),
+  ),
   div: View,
   text: Text,
   img: Image,
