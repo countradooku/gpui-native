@@ -26,6 +26,12 @@ export interface GPUCanvasStats {
 }
 
 type Slot = { buffer: GPUBuffer | undefined; size: number; busy: boolean }
+type Target = {
+  texture: GPUTexture
+  webHandle?: number
+  inFlight: number
+  retired: boolean
+}
 const COPY_SRC = 1
 const COPY_DST = 8
 const MAP_READ = 1
@@ -52,7 +58,6 @@ export class GPUCanvas extends EventTarget {
     Pick<NativeRenderer, "createCanvasSource" | "presentCanvasFrame" | "destroyCanvasSource">
   >
   readonly #host: NativeRenderer
-  #webHandle: number | undefined
   #ownsDevice = false
   readonly #direct?: NativeRenderer["presentCanvasTexture"]
   readonly #reset?: NativeRenderer["resetCanvasSource"]
@@ -61,7 +66,7 @@ export class GPUCanvas extends EventTarget {
   #width: number
   #height: number
   #configuration: GPUCanvasConfiguration | undefined
-  #texture: GPUTexture | undefined
+  #target: Target | undefined
   readonly #watchedDevices = new WeakSet<GPUDevice>()
   #generation = 0
   #sequence = 0
@@ -357,6 +362,8 @@ export class GPUCanvas extends EventTarget {
       return false
     }
     const texture = this.#currentTexture()
+    const target = this.#target!
+    target.inFlight++
     const generation = this.#generation
     const started = performance.now()
     this.#stats.inFlight++
@@ -367,7 +374,7 @@ export class GPUCanvas extends EventTarget {
         nativeDevice in configuration.device
           ? Reflect.get(configuration.device, nativeDevice)
           : configuration.device,
-        this.#webHandle ?? (Reflect.get(texture, nativeTexture) as number),
+        target.webHandle ?? (Reflect.get(texture, nativeTexture) as number),
         (configuration.alphaMode ?? "opaque") === "opaque",
       )
       if (!result || generation !== this.#generation || this.#destroyed) {
@@ -385,6 +392,8 @@ export class GPUCanvas extends EventTarget {
       this.#stats.failed++
       throw error
     } finally {
+      target.inFlight--
+      if (target.retired) this.#releaseTarget(target)
       this.#stats.inFlight--
     }
   }
@@ -406,21 +415,28 @@ export class GPUCanvas extends EventTarget {
   #releaseGPU(): void {
     this.#generation++
     this.#reset?.(this.id)
-    this.#texture?.destroy()
-    if (this.#webHandle !== undefined) this.#host.releaseCanvasTexture?.(this.#webHandle)
-    this.#webHandle = undefined
-    this.#texture = undefined
+    if (this.#target) this.#releaseTarget(this.#target)
+    this.#target = undefined
     for (const slot of this.#slots) {
       slot.buffer?.destroy()
       slot.buffer = undefined
       slot.size = 0
     }
   }
+  #releaseTarget(target: Target): void {
+    target.retired = true
+    // Native presentation can still be preparing its GPU copy on a worker.
+    // Invalidate publication immediately, but retain the texture and handle
+    // until every direct presentation using this target has settled.
+    if (target.inFlight) return
+    target.texture.destroy()
+    if (target.webHandle !== undefined) this.#host.releaseCanvasTexture?.(target.webHandle)
+  }
   #currentTexture(): GPUTexture {
     this.#assertAlive()
     const configuration = this.#configuration
     if (!configuration) throw new Error("Configure the WebGPU canvas before acquiring a texture")
-    if (this.#texture) return this.#texture
+    if (this.#target) return this.#target.texture
     const descriptor: GPUTextureDescriptor = {
       label: "GPUI canvas target",
       size: { width: this.width, height: this.height },
@@ -430,12 +446,20 @@ export class GPUCanvas extends EventTarget {
     }
     if (this.#direct && this.#host.createCanvasTexture) {
       const target = this.#host.createCanvasTexture(descriptor)
-      this.#webHandle = target.handle
-      this.#texture = target.texture
+      this.#target = {
+        texture: target.texture,
+        webHandle: target.handle,
+        inFlight: 0,
+        retired: false,
+      }
     } else {
-      this.#texture = configuration.device.createTexture(descriptor)
+      this.#target = {
+        texture: configuration.device.createTexture(descriptor),
+        inFlight: 0,
+        retired: false,
+      }
     }
-    return this.#texture
+    return this.#target.texture
   }
 }
 

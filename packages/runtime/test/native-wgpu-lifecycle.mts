@@ -152,13 +152,21 @@ if (hasNativeTestRenderer && process.platform === "darwin") {
       assert(await b.present(), "Completed compositor leases must return to the pool")
       screenshot()
     }
-    const pending = a.present()
-    a.resize(48, 24)
-    assert.equal(await pending, false, "Resize invalidates an outstanding publication")
-    fill(a, [1, 1, 0, 1])
-    assert(await a.present())
+    for (let iteration = 0; iteration < 16; iteration++) {
+      const pending = [a.present(), a.present()]
+      a.resize(48 + iteration, 24)
+      assert.deepEqual(
+        await Promise.all(pending),
+        [false, false],
+        "Resize invalidates pending publications without destroying their copy source early",
+      )
+      fill(a, [1, 1, 0, 1])
+      assert(await a.present())
+    }
+    const disposing = a.present()
     a.destroy()
     a.destroy()
+    assert.equal(await disposing, false, "Disposal safely retires an outstanding publication")
     png = screenshot()
     assert.deepEqual(pixel(png, 16, 16), [0, 0, 255, 255])
     assert.equal(a.stats.bytesPresented, 0)
